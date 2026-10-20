@@ -33,9 +33,14 @@ Testcontainers já provê replica set de 1 nó).
 
 | Recebe (comando) | Faz | Publica (evento) |
 |---|---|---|
-| `ComandoReservarEstoque` | reserva ACTIVE | `ReservaConfirmada` ou `ReservaFalhou` (motivo) |
+| `ComandoReservarEstoque` | reserva ACTIVE | `ReservaConfirmada` (com peças precificadas) ou `ReservaFalhou` (motivo) |
 | `ComandoConfirmarReserva` | baixa de estoque | `ReservaBaixada` |
 | `ComandoLiberarReserva` | devolve ao estoque | `ReservaLiberada` |
+
+No `ReservaConfirmada`, o Execution (dono do catálogo) enriquece cada peça com
+`name`, `sku`, `brand` (marca) e `unitPrice` (preço de venda) — é esse snapshot
+que o OS Service repassa ao Billing para montar o orçamento, sem o Billing acessar
+o estoque. A mesma peça em marcas diferentes é um produto distinto (preço distinto).
 
 Consumer com dedupe por `messageId` e redrive para DLQ em caso de erro.
 `messaging.enabled=false` (default) permite rodar sem broker (dev/testes).
@@ -75,5 +80,6 @@ mvn spring-boot:run
 - [x] Extração hexagonal de stock + product para MongoDB
 - [x] Regra reserva → baixa → retorno (domínio + transação Mongo)
 - [x] API REST (CRUD estoque/produto + disponibilidade)
-- [x] Consumer/publisher da Saga (SNS/SQS)
-- [ ] Orquestração ponta a ponta com OS/Billing (Etapa 5)
+- [x] Consumer/publisher da Saga (SNS/SQS); `ReservaConfirmada` com peças precificadas (marca/preço)
+- [x] Participa da Saga orquestrada pelo OS Service (reserva/baixa/liberação)
+- [ ] Validação ponta a ponta no ambiente integrado (homologação — manual)
