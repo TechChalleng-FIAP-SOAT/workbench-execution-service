@@ -1,0 +1,49 @@
+spring:
+  application:
+    name: execution-service
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/execution}
+      auto-index-creation: true
+      # Necessário para persistir campos UUID (ex.: serviceOrderId) de forma portável.
+      uuid-representation: standard
+
+logging:
+  file:
+    name: /tmp/app.log
+  level:
+    root: INFO
+
+management:
+  metrics:
+    tags:
+      service: ${DD_SERVICE:${spring.application.name}}
+      env: ${DD_ENV:local}
+      version: ${DD_VERSION:local}
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  datadog:
+    metrics:
+      export:
+        enabled: ${DD_METRICS_ENABLED:false}
+        api-key: ${DD_API_KEY:}
+        uri: ${DD_METRICS_URI:https://api.datadoghq.com}
+        step: 1m
+
+server:
+  port: 8080
+
+# Mensageria (Saga) — mesma convenção do os-service.
+messaging:
+  enabled: ${MESSAGING_ENABLED:false}
+  region: ${AWS_REGION:us-east-1}
+  endpoint: ${AWS_ENDPOINT:}
+  execution-events-topic-arn: ${EXECUTION_EVENTS_TOPIC_ARN:}
+  commands-queue-url: ${EXECUTION_COMMANDS_QUEUE_URL:}
