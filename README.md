@@ -1,85 +1,205 @@
-# workbench-execution-service — Execution Service (Tech Challenge Fase 4)
+# workbench-execution-service — Execution Service
 
-Microsserviço responsável por **estoque, produtos e execução** da plataforma
-Workbench. Dono do estoque e do ciclo de **reserva → baixa → retorno** (ADR-0005).
+Microsserviço de **estoque, produtos e execução** da plataforma Workbench (Tech
+Challenge — FIAP Pós Tech, Fase 4). Dono do estoque e do ciclo
+**reserva → baixa → retorno**. É o **único serviço NoSQL** do conjunto (MongoDB).
 
-Extraído dos módulos `stock` e `product` do monólito, adaptado para **MongoDB**
-(único serviço NoSQL do conjunto — ADR-0003/0005), em Arquitetura Hexagonal.
+> **Contexto (Fase 4):** na Fase 3 a oficina era um **monólito** (`workbench-monolith`,
+> mantido como base histórica). Na Fase 4 a aplicação foi refatorada em
+> **microsserviços independentes**, cada um com seu repositório, infraestrutura e
+> banco próprios. Este repositório é o **Execution Service**. A divisão dos serviços e
+> a estratégia da Saga estão nos ADRs (`workbench-monolith/docs/adr` — ADR-0003 e ADR-0005).
+
+---
+
+## Sumário
+
+- [Responsabilidades](#responsabilidades)
+- [Requisitos obrigatórios do PDF cobertos aqui](#requisitos-obrigatórios-do-pdf-cobertos-aqui)
+- [Banco NoSQL (MongoDB) e reserva atômica](#banco-nosql-mongodb-e-reserva-atômica)
+- [Comunicação e participação na Saga](#comunicação-e-participação-na-saga)
+- [Arquitetura da aplicação (hexagonal)](#arquitetura-da-aplicação-hexagonal)
+- [Arquitetura de infraestrutura](#arquitetura-de-infraestrutura)
+- [Fluxo de Deploy (CI/CD)](#fluxo-de-deploy-cicd)
+- [Tecnologias](#tecnologias)
+- [Como executar localmente](#como-executar-localmente)
+- [Deploy em Kubernetes / AWS](#deploy-em-kubernetes--aws)
+- [Referência de endpoints](#referência-de-endpoints)
+- [Testes e cobertura](#testes-e-cobertura)
+- [Documentação da API (Swagger)](#documentação-da-api-swagger)
+
+---
 
 ## Responsabilidades
 
-- CRUD de produtos (peças/insumos) e de estoque
-- Entrada/saída de estoque com histórico de movimentações
-- **Consulta de disponibilidade** (para montar orçamento): informa falta de peça
-  com nome e quantidade disponível
+- CRUD de **produtos** (peças/insumos) e de **estoque**
+- Entrada/saída de estoque com **histórico de movimentações**
+- **Consulta de disponibilidade** (para montar o orçamento): informa a falta com nome
+  da peça e quantidade disponível
 - **Reserva de estoque** com máquina de estados, orquestrada pela Saga:
-  `ACTIVE` (reservado) → `CONFIRMED` (baixa, na aprovação) → `RELEASED` (volta, na recusa)
+  `ACTIVE` (reservado) → `CONFIRMED` (baixa, na aprovação) → `RELEASED` (retorno, na recusa)
 
-## Banco: MongoDB (NoSQL)
+---
 
-Único serviço NoSQL da plataforma. A reserva (ajuste de estoque + registro +
-movimento) é **atômica** via transações multi-documento do Mongo (`@Transactional`),
-o que exige um **replica set** (o manifesto local sobe `mongod --replSet rs0`; o
-Testcontainers já provê replica set de 1 nó).
+## Requisitos obrigatórios do PDF cobertos aqui
 
-## Comunicação
+| Requisito (PDF Fase 4) | Como este serviço atende |
+|---|---|
+| ≥3 microsserviços independentes | É um dos 4 serviços, com repo/infra/banco próprios |
+| Banco próprio | **MongoDB** exclusivo; nenhum outro serviço o acessa |
+| **SQL e NoSQL (no conjunto)** | **Cumpre o requisito NoSQL** da plataforma (MongoDB); os demais são PostgreSQL |
+| Nenhum acesso ao banco de outro serviço | Expõe disponibilidade via **REST**; reserva/baixa/liberação via **mensageria** |
+| REST + mensageria assíncrona | `POST /api/stocks/availability` (síncrono) + **SNS/SQS** (comandos/eventos) |
+| Saga Pattern + compensação | Participa da Saga: reserva/baixa/liberação são os passos compensáveis |
+| Testes + 80% cobertura + Sonar | JaCoCo gate 80% no `verify` + SonarCloud (cobertura ~89%) |
+| CI/CD + deploy K8s + branch protegida | Pipeline próprio; `main` protegida |
+
+---
+
+## Banco NoSQL (MongoDB) e reserva atômica
+
+Único serviço **NoSQL** da plataforma — é ele que satisfaz o requisito obrigatório
+"ao menos um banco não relacional". A reserva (ajuste de estoque + registro da reserva
++ movimento) é **atômica** via **transações multi-documento** do MongoDB
+(`@Transactional`), o que exige um **replica set** (o ambiente local sobe
+`mongod --replSet rs0`; o Testcontainers provê um replica set de 1 nó).
+
+> Decisão (ADR-0005): **Mongo puro** neste serviço (um serviço = um banco), em vez de
+> Postgres+Mongo, evitando dois datasources. A atomicidade da reserva é garantida pela
+> transação do Mongo.
+
+---
+
+## Comunicação e participação na Saga
 
 | Caso | Mecanismo |
 |---|---|
 | Consulta de disponibilidade (montar orçamento) | **REST síncrono** (`POST /api/stocks/availability`) |
 | Reserva / baixa / liberação (passos da Saga) | **Mensageria SNS/SQS** |
 
-### Comandos consumidos / eventos publicados (Saga)
-
 | Recebe (comando) | Faz | Publica (evento) |
 |---|---|---|
-| `ComandoReservarEstoque` | reserva ACTIVE | `ReservaConfirmada` (com peças precificadas) ou `ReservaFalhou` (motivo) |
+| `ComandoReservarEstoque` | reserva `ACTIVE` | `ReservaConfirmada` (peças precificadas) ou `ReservaFalhou` |
 | `ComandoConfirmarReserva` | baixa de estoque | `ReservaBaixada` |
 | `ComandoLiberarReserva` | devolve ao estoque | `ReservaLiberada` |
 
-No `ReservaConfirmada`, o Execution (dono do catálogo) enriquece cada peça com
-`name`, `sku`, `brand` (marca) e `unitPrice` (preço de venda) — é esse snapshot
-que o OS Service repassa ao Billing para montar o orçamento, sem o Billing acessar
-o estoque. A mesma peça em marcas diferentes é um produto distinto (preço distinto).
+No `ReservaConfirmada`, o Execution (dono do catálogo) enriquece cada peça com `name`,
+`sku`, `brand` (marca) e `unitPrice`. A **mesma peça em marcas diferentes** é um
+produto distinto, com preço distinto. Consumer com dedupe por `messageId` e redrive
+para **DLQ**.
 
-Consumer com dedupe por `messageId` e redrive para DLQ em caso de erro.
-`messaging.enabled=false` (default) permite rodar sem broker (dev/testes).
+---
 
-## Endpoints REST principais
+## Arquitetura da aplicação (hexagonal)
+
+```
+src/main/java/com/workbench/workshop/
+├── adapter/
+│   ├── in/web/            # ProductController, StockController
+│   └── out/persistence/   # Adapters MongoDB (product, stock, reservation, movement)
+├── application/           # Use cases + ports (ReservationUseCases, ProductUseCases, CheckAvailability)
+├── domain/                # Product, Stock, StockReservation (máquina de estados), StockMovement
+└── infrastructure/        # config (Mongo), messaging (SNS/SQS)
+```
+
+---
+
+## Arquitetura de infraestrutura
+
+Banco **MongoDB próprio** (replica set), namespace `execution-service` no cluster EKS
+compartilhado `workbench-platform-<env>`. Sem acesso cruzado a bancos. Tópicos/filas
+no repo `workbench-messaging`.
+
+---
+
+## Fluxo de Deploy (CI/CD)
+
+```
+push (main/develop) ou PR
+   │
+   ▼
+unit-test ──▶ code-analysis ──▶ build ──▶ docker-build-push ──▶ deploy-aws
+(mvn verify   (JaCoCo gate 80%  (mvn      (imagem p/ Docker Hub  (EKS, só se
+ + JaCoCo      + Sonar)          package)  usuario/execution-service) USE_AWS=true)
+ badge)
+```
+
+Secrets/variáveis idênticos aos demais serviços (`DOCKER_*`, `SONAR_TOKEN`, `AWS_*`,
+`USE_AWS`). O MongoDB gerenciado (ex.: DocumentDB/Atlas) é pré-requisito do deploy AWS.
+
+---
+
+## Tecnologias
+
+| Tecnologia | Finalidade |
+|---|---|
+| Java 21 + Spring Boot 4.0.5 | Framework web e DI |
+| MongoDB 7 (replica set) | Banco próprio (**NoSQL**); transação multi-documento |
+| AWS SNS/SQS (SDK v2) | Mensageria da Saga + DLQ |
+| Micrometer + Datadog | Métricas e observabilidade |
+| SpringDoc OpenAPI | Swagger UI |
+| JaCoCo (gate 80%) + SonarCloud | Qualidade e cobertura |
+| Testcontainers (MongoDB) | Integração com MongoDB real (replica set) |
+
+---
+
+## Como executar localmente
+
+Requer um MongoDB em **replica set** (para as transações). Exemplo com Docker:
+
+```bash
+docker run -d -p 27017:27017 mongo:7 --replSet rs0
+# em outro terminal, inicie o replica set:
+docker exec -it <container> mongosh --eval "rs.initiate()"
+
+./mvnw spring-boot:run
+```
+
+| Variável | Default | Descrição |
+|---|---|---|
+| `MESSAGING_ENABLED` | `false` | liga SNS/SQS; `false` roda sem broker |
+| `AWS_ENDPOINT` | — | vazio = AWS real; `http://localhost:4566` = LocalStack |
+
+---
+
+## Deploy em Kubernetes / AWS
+
+Manifests em `k8s/`. Deploy automatizado pelo pipeline (`deploy-aws`, quando
+`USE_AWS=true`) no cluster `workbench-platform-<branch>`, namespace `execution-service`.
+
+---
+
+## Referência de endpoints
 
 | Método | Rota | Descrição |
 |---|---|---|
 | POST | `/api/products` | Adicionar peça/insumo |
 | DELETE | `/api/products/{id}` | Remover peça/insumo |
 | POST | `/api/stocks` | Criar estoque de um produto |
-| PATCH | `/api/stocks/product/{id}/entry` | Entrada |
-| PATCH | `/api/stocks/product/{id}/exit` | Saída |
+| PATCH | `/api/stocks/product/{id}/entry` | Entrada de estoque |
+| PATCH | `/api/stocks/product/{id}/exit` | Saída de estoque |
 | POST | `/api/stocks/availability` | Verificar disponibilidade de itens |
-| POST | `/api/stocks/reservations` | Reservar |
+| POST | `/api/stocks/reservations` | Reservar estoque |
 | PATCH | `/api/stocks/reservations/service-order/{osId}/confirm` | Confirmar (baixa) |
 | PATCH | `/api/stocks/reservations/service-order/{osId}/release` | Liberar (retorno) |
 
-Swagger UI: `http://localhost:8080/swagger-ui/index.html`
+---
 
-## Rodar localmente
+## Testes e cobertura
 
 ```bash
-# requer um MongoDB em replica set (para transações). Ex. via Docker:
-# docker run -d -p 27017:27017 mongo:7 --replSet rs0  (e rs.initiate())
-mvn spring-boot:run
+./mvnw verify
 ```
 
-## Qualidade
+- **Gate JaCoCo 80%** no `verify`.
+- Integração com **Testcontainers MongoDB** (replica set) — fluxo real reserva→baixa.
+- Cobertura atual: **~89%** (`target/site/jacoco/index.html`).
 
-- Cobertura **86.5%** (JaCoCo, gate de 80%); testes unitários + integração com
-  **Testcontainers MongoDB** (fluxo real reserva→baixa validado).
-- Pipeline: `unit-test → code-analysis (JaCoCo+Sonar) → build → docker → deploy EKS`.
+---
 
-## Status na Fase 4
+## Documentação da API (Swagger)
 
-- [x] Extração hexagonal de stock + product para MongoDB
-- [x] Regra reserva → baixa → retorno (domínio + transação Mongo)
-- [x] API REST (CRUD estoque/produto + disponibilidade)
-- [x] Consumer/publisher da Saga (SNS/SQS); `ReservaConfirmada` com peças precificadas (marca/preço)
-- [x] Participa da Saga orquestrada pelo OS Service (reserva/baixa/liberação)
-- [ ] Validação ponta a ponta no ambiente integrado (homologação — manual)
+| Recurso | URL (local) |
+|---|---|
+| Swagger UI | http://localhost:8080/swagger-ui/index.html |
+| OpenAPI JSON | http://localhost:8080/v3/api-docs |
