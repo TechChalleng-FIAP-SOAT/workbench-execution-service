@@ -5,6 +5,7 @@ import com.workbench.workshop.application.stock.ReservationUseCases;
 import com.workbench.workshop.application.stock.StockUseCases;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -26,7 +27,7 @@ public class StockController {
 
     @PostMapping
     @Operation(summary = "Criar estoque para um produto")
-    public ResponseEntity<StockDtos.StockResponse> create(@RequestBody StockDtos.CreateStockRequest req) {
+    public ResponseEntity<StockDtos.StockResponse> create(@Valid @RequestBody StockDtos.CreateStockRequest req) {
         var stock = stockUseCases.create(req.productId(), req.quantity(), req.minimumQuantity());
         return ResponseEntity.status(HttpStatus.CREATED).body(StockDtos.StockResponse.from(stock));
     }
@@ -52,14 +53,14 @@ public class StockController {
     @PatchMapping("/product/{productId}/entry")
     @Operation(summary = "Entrada de estoque")
     public ResponseEntity<StockDtos.StockResponse> entry(@PathVariable String productId,
-                                                         @RequestBody StockDtos.MovementRequest req) {
+                                                         @Valid @RequestBody StockDtos.MovementRequest req) {
         return ResponseEntity.ok(StockDtos.StockResponse.from(stockUseCases.entry(productId, req.quantity(), req.reason())));
     }
 
     @PatchMapping("/product/{productId}/exit")
     @Operation(summary = "Saída de estoque")
     public ResponseEntity<StockDtos.StockResponse> exit(@PathVariable String productId,
-                                                        @RequestBody StockDtos.MovementRequest req) {
+                                                        @Valid @RequestBody StockDtos.MovementRequest req) {
         return ResponseEntity.ok(StockDtos.StockResponse.from(stockUseCases.exit(productId, req.quantity(), req.reason())));
     }
 
@@ -73,7 +74,7 @@ public class StockController {
     @PostMapping("/availability")
     @Operation(summary = "Verificar disponibilidade de itens (para montar orçamento)")
     public ResponseEntity<CheckAvailabilityUseCase.AvailabilityResult> availability(
-            @RequestBody StockDtos.AvailabilityRequest req) {
+            @Valid @RequestBody StockDtos.AvailabilityRequest req) {
         var items = req.items().stream()
                 .map(i -> new CheckAvailabilityUseCase.RequestedItem(i.productId(), i.quantity())).toList();
         return ResponseEntity.ok(checkAvailabilityUseCase.execute(items));
@@ -81,7 +82,7 @@ public class StockController {
 
     @PostMapping("/reservations")
     @Operation(summary = "Reservar estoque para uma OS")
-    public ResponseEntity<List<StockDtos.ReservationResponse>> reserve(@RequestBody StockDtos.ReserveRequest req) {
+    public ResponseEntity<List<StockDtos.ReservationResponse>> reserve(@Valid @RequestBody StockDtos.ReserveRequest req) {
         var items = req.items().stream()
                 .map(i -> new ReservationUseCases.ReserveItem(i.productId(), i.quantity())).toList();
         var result = reservationUseCases.reserve(req.serviceOrderId(), items).stream()
