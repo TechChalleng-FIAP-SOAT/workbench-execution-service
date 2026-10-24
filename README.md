@@ -169,14 +169,25 @@ Manifests em `k8s/`. Deploy automatizado pelo pipeline (`deploy-aws`, quando
 
 ---
 
+## Segurança (JWT)
+
+Defesa em profundidade: o serviço **valida o JWT por conta própria** (Spring Security +
+filtro HS256 com o `JWT_SECRET` compartilhado). Catálogo e estoque são operações internas
+da oficina, então **todas as rotas exigem token de staff (ADMIN/TECHNICIAN)**; públicas
+apenas `GET /actuator/health*` e Swagger/OpenAPI.
+
+---
+
 ## Referência de endpoints
+
+Todas exigem token de staff (ADMIN/TECHNICIAN).
 
 | Método | Rota | Descrição |
 |---|---|---|
 | POST | `/api/products` | Adicionar peça/insumo |
 | DELETE | `/api/products/{id}` | Remover peça/insumo |
 | POST | `/api/stocks` | Criar estoque de um produto |
-| PATCH | `/api/stocks/product/{id}/entry` | Entrada de estoque |
+| PATCH | `/api/stocks/product/{id}/entry` | Entrada de estoque (**adicionar quantidade** a produto existente) |
 | PATCH | `/api/stocks/product/{id}/exit` | Saída de estoque |
 | POST | `/api/stocks/availability` | Verificar disponibilidade de itens |
 | POST | `/api/stocks/reservations` | Reservar estoque |
