@@ -8,6 +8,10 @@ spring:
       # Necessário para persistir campos UUID (ex.: serviceOrderId) de forma portável.
       uuid-representation: standard
 
+# JWT (HS256) — mesmo secret compartilhado pela plataforma (Lambda/os-service).
+jwt:
+  secret: ${JWT_SECRET:akmsdkmasfnjsgknakmsdkmasdkmsadfkmdsakmdkmsadsa}
+
 logging:
   file:
     name: /tmp/app.log

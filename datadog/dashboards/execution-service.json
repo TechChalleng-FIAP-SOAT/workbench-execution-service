@@ -1,0 +1,12 @@
+{
+  "title": "Execution Service | Operação",
+  "description": "Dashboard operacional do microsserviço de Execução e Produção. Tags obrigatórias: service:execution-service, env:<ambiente>.",
+  "layout_type": "ordered",
+  "template_variables": [{"name":"env","prefix":"env","default":"production","available_values":["developer","homolog","production"]}],
+  "widgets": [
+    {"definition":{"type":"timeseries","title":"Throughput de requisições (por recurso)","requests":[{"q":"sum:trace.servlet.request.hits{service:execution-service,env:$env} by {resource_name}.as_rate()","display_type":"bars"}]}},
+    {"definition":{"type":"timeseries","title":"Latência das APIs (p95)","requests":[{"q":"p95:trace.servlet.request{service:execution-service,env:$env} by {resource_name}","display_type":"line"}]}},
+    {"definition":{"type":"timeseries","title":"Taxa de erros HTTP","requests":[{"q":"sum:trace.servlet.request.errors{service:execution-service,env:$env} by {resource_name}.as_rate()","display_type":"bars"}]}},
+    {"definition":{"type":"timeseries","title":"CPU e memória dos pods","requests":[{"q":"avg:kubernetes.cpu.usage.total{service:execution-service,env:$env} by {pod_name}","display_type":"line"},{"q":"avg:kubernetes.memory.usage{service:execution-service,env:$env} by {pod_name}","display_type":"line"}]}}
+  ]
+}
