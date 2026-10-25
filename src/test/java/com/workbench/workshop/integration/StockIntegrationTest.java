@@ -159,6 +159,15 @@ class StockIntegrationTest {
     }
 
     @Test
+    void createProductWithBlankNameReturns400() throws Exception {
+        // Bean Validation (OWASP A03): name em branco → 400 do handler.
+        mockMvc.perform(auth(post("/api/products"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"\",\"sku\":\"X-1\",\"type\":\"PART\",\"unit\":\"UNIT\",\"salePrice\":10.00}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
     void healthIsPublic() throws Exception {
         mockMvc.perform(get("/actuator/health")).andExpect(status().isOk());
     }
