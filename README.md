@@ -106,9 +106,17 @@ src/main/java/com/workbench/workshop/
 
 ## Arquitetura de infraestrutura
 
-Banco **MongoDB próprio** (replica set), namespace `execution-service` no cluster EKS
-compartilhado `workbench-platform-<env>`. Sem acesso cruzado a bancos. Tópicos/filas
-no repo `workbench-messaging`.
+Banco **MongoDB próprio e gerenciado** — **MongoDB Atlas** (cluster free tier `M0`),
+fora do cluster. Os pods do `execution-service` (namespace `execution-service` no EKS
+`workbench-platform-<env>`) conectam no Atlas pela connection string `mongodb+srv://...`,
+injetada no `MONGODB_URI` via **Secret** (`k8s/secret.yaml`). Sem acesso cruzado a
+bancos. Tópicos/filas no repo `workbench-messaging`.
+
+> **Por ambiente:**
+> - **Produção/AWS:** MongoDB Atlas (gerenciado). Nenhum Mongo roda no cluster.
+> - **Local:** o Mongo sobe pelo `workbench-messaging/docker-compose.dev.yml` (porta 27017).
+> - **Opcional (k8s sem Atlas):** `kubectl apply -f k8s/mongo-local.yaml` sobe um Mongo
+>   in-cluster — **não** é aplicado pelo pipeline.
 
 ---
 
@@ -125,7 +133,10 @@ unit-test ──▶ code-analysis ──▶ build ──▶ docker-build-push �
 ```
 
 Secrets/variáveis idênticos aos demais serviços (`DOCKER_*`, `SONAR_TOKEN`, `AWS_*`,
-`USE_AWS`). O MongoDB gerenciado (ex.: DocumentDB/Atlas) é pré-requisito do deploy AWS.
+`USE_AWS`), mais o **`MONGODB_URI`** (connection string do Atlas) no Secret do serviço.
+Um **cluster MongoDB Atlas** (free tier `M0`) é pré-requisito do deploy AWS: crie o
+cluster, um usuário de banco, libere o acesso de rede e use a URI `mongodb+srv://...`
+como `MONGODB_URI`.
 
 ---
 
@@ -134,7 +145,7 @@ Secrets/variáveis idênticos aos demais serviços (`DOCKER_*`, `SONAR_TOKEN`, `
 | Tecnologia | Finalidade |
 |---|---|
 | Java 21 + Spring Boot 4.0.5 | Framework web e DI |
-| MongoDB 7 (replica set) | Banco próprio (**NoSQL**); transação multi-documento |
+| MongoDB 7 — Atlas (prod) / replica set (local) | Banco próprio gerenciado (**NoSQL**); transação multi-documento |
 | AWS SNS/SQS (SDK v2) | Mensageria da Saga + DLQ |
 | Micrometer + Datadog | Métricas e observabilidade |
 | SpringDoc OpenAPI | Swagger UI |
