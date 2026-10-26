@@ -1,0 +1,8 @@
+{
+  "name": "[execution-service] Taxa de erros HTTP elevada",
+  "type": "metric alert",
+  "query": "sum(last_5m):sum:trace.servlet.request.errors{service:execution-service,env:production}.as_count() >= 5",
+  "message": "5 ou mais respostas de erro em 5 minutos. Investigue os logs correlacionados (service:execution-service) e o APM. @team-oncall",
+  "tags": ["service:execution-service", "env:production", "team:workshop"],
+  "options": {"thresholds": {"critical": 5}, "notify_no_data": false, "include_tags": true}
+}

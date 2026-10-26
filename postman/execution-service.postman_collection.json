@@ -1,0 +1,134 @@
+{
+  "info": {
+    "name": "Workbench - Execution Service",
+    "description": "Collection do microsserviço de Execução e Produção: catálogo de peças (Product) e estoque/reservas (Stock). NoSQL (MongoDB). Participa da Saga reservando/baixando/liberando estoque. Variáveis: baseUrl, token, productId, serviceOrderId.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {"key": "baseUrl", "value": "http://localhost:8080"},
+    {"key": "token", "value": ""},
+    {"key": "productId", "value": "PROD-1"},
+    {"key": "serviceOrderId", "value": ""}
+  ],
+  "auth": {
+    "type": "bearer",
+    "bearer": [{"key": "token", "value": "{{token}}", "type": "string"}]
+  },
+  "item": [
+    {
+      "name": "Product",
+      "item": [
+        {
+          "name": "Adicionar peça/insumo ao catálogo",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/api/products", "host": ["{{baseUrl}}"], "path": ["api", "products"]},
+            "body": {"mode": "raw", "raw": "{\n  \"name\": \"Óleo 5W30\",\n  \"sku\": \"OLEO-5W30\",\n  \"type\": \"PART\",\n  \"unit\": \"UN\",\n  \"category\": \"Lubrificantes\",\n  \"brand\": \"Mobil\",\n  \"costPrice\": 25.00,\n  \"salePrice\": 45.00,\n  \"manufacturerCode\": \"MB-5W30\",\n  \"warrantyMonths\": 6,\n  \"fractionalAllowed\": false,\n  \"packageSize\": 1\n}"}
+          }
+        },
+        {
+          "name": "Listar produtos",
+          "request": {"method": "GET", "url": {"raw": "{{baseUrl}}/api/products", "host": ["{{baseUrl}}"], "path": ["api", "products"]}}
+        },
+        {
+          "name": "Buscar produto por ID",
+          "request": {"method": "GET", "url": {"raw": "{{baseUrl}}/api/products/{{productId}}", "host": ["{{baseUrl}}"], "path": ["api", "products", "{{productId}}"]}}
+        },
+        {
+          "name": "Remover peça/insumo do catálogo",
+          "request": {"method": "DELETE", "url": {"raw": "{{baseUrl}}/api/products/{{productId}}", "host": ["{{baseUrl}}"], "path": ["api", "products", "{{productId}}"]}}
+        }
+      ]
+    },
+    {
+      "name": "Stock",
+      "item": [
+        {
+          "name": "Criar estoque para um produto",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/api/stocks", "host": ["{{baseUrl}}"], "path": ["api", "stocks"]},
+            "body": {"mode": "raw", "raw": "{\n  \"productId\": \"{{productId}}\",\n  \"quantity\": 100,\n  \"minimumQuantity\": 10\n}"}
+          }
+        },
+        {
+          "name": "Listar estoques",
+          "request": {"method": "GET", "url": {"raw": "{{baseUrl}}/api/stocks", "host": ["{{baseUrl}}"], "path": ["api", "stocks"]}}
+        },
+        {
+          "name": "Listar estoques abaixo do mínimo",
+          "request": {"method": "GET", "url": {"raw": "{{baseUrl}}/api/stocks/low", "host": ["{{baseUrl}}"], "path": ["api", "stocks", "low"]}}
+        },
+        {
+          "name": "Buscar estoque por produto",
+          "request": {"method": "GET", "url": {"raw": "{{baseUrl}}/api/stocks/product/{{productId}}", "host": ["{{baseUrl}}"], "path": ["api", "stocks", "product", "{{productId}}"]}}
+        },
+        {
+          "name": "Entrada de estoque",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/api/stocks/product/{{productId}}/entry", "host": ["{{baseUrl}}"], "path": ["api", "stocks", "product", "{{productId}}", "entry"]},
+            "body": {"mode": "raw", "raw": "{\n  \"quantity\": 50,\n  \"reason\": \"Reposição de fornecedor\"\n}"}
+          }
+        },
+        {
+          "name": "Saída de estoque",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/api/stocks/product/{{productId}}/exit", "host": ["{{baseUrl}}"], "path": ["api", "stocks", "product", "{{productId}}", "exit"]},
+            "body": {"mode": "raw", "raw": "{\n  \"quantity\": 5,\n  \"reason\": \"Ajuste de inventário\"\n}"}
+          }
+        },
+        {
+          "name": "Atualizar quantidade mínima",
+          "request": {
+            "method": "PATCH",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/api/stocks/product/{{productId}}/minimum", "host": ["{{baseUrl}}"], "path": ["api", "stocks", "product", "{{productId}}", "minimum"]},
+            "body": {"mode": "raw", "raw": "{\n  \"quantity\": 15\n}"}
+          }
+        },
+        {
+          "name": "Verificar disponibilidade de itens",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/api/stocks/availability", "host": ["{{baseUrl}}"], "path": ["api", "stocks", "availability"]},
+            "body": {"mode": "raw", "raw": "{\n  \"items\": [\n    { \"productId\": \"{{productId}}\", \"quantity\": 2 }\n  ]\n}"}
+          }
+        },
+        {
+          "name": "Reservar estoque para uma OS",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/api/stocks/reservations", "host": ["{{baseUrl}}"], "path": ["api", "stocks", "reservations"]},
+            "body": {"mode": "raw", "raw": "{\n  \"serviceOrderId\": \"{{serviceOrderId}}\",\n  \"items\": [\n    { \"productId\": \"{{productId}}\", \"quantity\": 2 }\n  ]\n}"}
+          }
+        },
+        {
+          "name": "Confirmar reservas (baixa de estoque)",
+          "request": {"method": "PATCH", "url": {"raw": "{{baseUrl}}/api/stocks/reservations/service-order/{{serviceOrderId}}/confirm", "host": ["{{baseUrl}}"], "path": ["api", "stocks", "reservations", "service-order", "{{serviceOrderId}}", "confirm"]}}
+        },
+        {
+          "name": "Liberar reservas (volta ao estoque)",
+          "request": {"method": "PATCH", "url": {"raw": "{{baseUrl}}/api/stocks/reservations/service-order/{{serviceOrderId}}/release", "host": ["{{baseUrl}}"], "path": ["api", "stocks", "reservations", "service-order", "{{serviceOrderId}}", "release"]}}
+        },
+        {
+          "name": "Listar reservas de uma OS",
+          "request": {"method": "GET", "url": {"raw": "{{baseUrl}}/api/stocks/reservations/service-order/{{serviceOrderId}}", "host": ["{{baseUrl}}"], "path": ["api", "stocks", "reservations", "service-order", "{{serviceOrderId}}"]}}
+        }
+      ]
+    },
+    {
+      "name": "Health",
+      "item": [
+        {"name": "Health check", "request": {"method": "GET", "auth": {"type": "noauth"}, "url": {"raw": "{{baseUrl}}/actuator/health", "host": ["{{baseUrl}}"], "path": ["actuator", "health"]}}}
+      ]
+    }
+  ]
+}

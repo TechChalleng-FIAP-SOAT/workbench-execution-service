@@ -40,15 +40,20 @@ public class SagaCommandHandler {
     @SuppressWarnings("unchecked")
     public void handle(MessageEnvelope cmd) {
         UUID serviceOrderId = UUID.fromString(cmd.serviceOrderId());
+        log.info("Comando recebido: type={}, serviceOrderId={}", cmd.type(), serviceOrderId);
         switch (cmd.type()) {
             case "ComandoReservarEstoque" -> reservar(cmd, serviceOrderId);
             case "ComandoConfirmarReserva" -> {
                 List<StockReservation> confirmed = reservationUseCases.confirm(serviceOrderId);
+                log.info("Reserva baixada (estoque confirmado): reservations={}, serviceOrderId={}",
+                        confirmed.size(), serviceOrderId);
                 publisher.publish(MessageEnvelope.of("ReservaBaixada", cmd.sagaId(), cmd.serviceOrderId(),
                         Map.of("reservations", confirmed.size())));
             }
             case "ComandoLiberarReserva" -> {
                 List<StockReservation> released = reservationUseCases.release(serviceOrderId);
+                log.info("Reserva liberada (compensação de estoque): reservations={}, serviceOrderId={}",
+                        released.size(), serviceOrderId);
                 publisher.publish(MessageEnvelope.of("ReservaLiberada", cmd.sagaId(), cmd.serviceOrderId(),
                         Map.of("reservations", released.size())));
             }
@@ -96,6 +101,8 @@ public class SagaCommandHandler {
                 .toList();
         try {
             var reservations = reservationUseCases.reserve(serviceOrderId, items);
+            log.info("Reserva confirmada (estoque reservado): reservations={}, serviceOrderId={}",
+                    reservations.size(), serviceOrderId);
             // Enriquece a resposta com as peças precificadas (name/sku/brand/unitPrice):
             // é o Execution, dono do catálogo, quem resolve marca e preço do productId.
             // O orquestrador repassa essas parts ao Billing no ComandoGerarOrcamento.
