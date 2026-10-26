@@ -112,8 +112,22 @@ jobs:
       # Opcional: sem DD_API_KEY, o install do Datadog Agent é ignorado e a app
       # sobe sem observabilidade in-cluster (o rollout não é bloqueado).
       DD_API_KEY: ${{ secrets.DD_API_KEY }}
+      # Valores reais do Secret da app, vindos dos secrets da org (o k8s/secret.yaml
+      # só tem placeholders).
+      MONGODB_URI: ${{ secrets.MONGODB_URI }}
+      JWT_SECRET: ${{ secrets.JWT_SECRET }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Validar secrets obrigatórios
+        run: |
+          missing=0
+          for v in MONGODB_URI JWT_SECRET; do
+            if [ -z "${!v}" ]; then
+              echo "::error::Secret obrigatório vazio ou ausente: ${v} (secrets da org). Sem ele o Secret execution-service-secret subiria sem credencial."
+              missing=1
+            fi
+          done
+          [ "${missing}" -eq 0 ] || exit 1
       - uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4
         with:
           aws-access-key-id: ${{ github.ref_name == 'main' && secrets.AWS_ACCESS_KEY_ID_MAIN || secrets.AWS_ACCESS_KEY_ID_DEVELOP }}
@@ -152,7 +166,14 @@ jobs:
           esac
           kubectl apply -f k8s/namespace.yaml
           kubectl apply -f k8s/configmap.yaml
-          kubectl apply -f k8s/secret.yaml
+          # Secret com os valores reais (no lugar do k8s/secret.yaml, que só tem
+          # placeholders). Vem depois do ConfigMap no envFrom, então as chaves daqui
+          # prevalecem sobre as do ConfigMap.
+          kubectl create secret generic execution-service-secret -n execution-service \
+            --from-literal MONGODB_URI="${MONGODB_URI}" \
+            --from-literal JWT_SECRET="${JWT_SECRET}" \
+            --from-literal DD_API_KEY="${DD_API_KEY}" \
+            --dry-run=client -o yaml | kubectl apply -f -
           kubectl apply -f k8s/app.yaml
           kubectl apply -f k8s/hpa.yaml
           kubectl patch deployment execution-service -n execution-service --type merge \
