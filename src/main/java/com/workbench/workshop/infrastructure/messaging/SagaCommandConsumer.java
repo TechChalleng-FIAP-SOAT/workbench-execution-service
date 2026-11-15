@@ -81,7 +81,8 @@ public class SagaCommandConsumer {
                 MDC.remove("service_order_id");
             }
         } catch (Exception e) {
-            log.error("Failed to process command; leaving for redrive/DLQ. body={}", message.body(), e);
+            // Sem o corpo no log: o payload pode levar dados pessoais.
+            log.error("Failed to process command; leaving for redrive/DLQ. sqsMessageId={}", message.messageId(), e);
         }
     }
 

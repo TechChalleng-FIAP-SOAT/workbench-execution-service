@@ -1,6 +1,12 @@
 spring:
   application:
     name: execution-service
+  # Mais de uma thread para os @Scheduled: o consumidor SQS faz long polling e não pode
+  # dividir a única thread padrão com os outros jobs (timeout da Saga, consulta ao gateway).
+  task:
+    scheduling:
+      pool:
+        size: ${SCHEDULING_POOL_SIZE:4}
   # Spring Boot 4: a conexão saiu de spring.data.mongodb.* para spring.mongodb.*
   # (as chaves antigas são ignoradas — o serviço cairia sempre em localhost).
   mongodb:
@@ -14,7 +20,7 @@ spring:
 
 # JWT (HS256) — mesmo secret compartilhado pela plataforma (Lambda/os-service).
 jwt:
-  secret: ${JWT_SECRET:akmsdkmasfnjsgknakmsdkmasdkmsadfkmdsakmdkmsadsa}
+  secret: ${JWT_SECRET}
 
 logging:
   file:

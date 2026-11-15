@@ -164,7 +164,7 @@ como `MONGODB_URI`.
 
 | Tecnologia | Finalidade |
 |---|---|
-| Java 21 + Spring Boot 4.0.5 | Framework web e DI |
+| Java 21 + Spring Boot 4.0.9 | Framework web e DI |
 | MongoDB 7 — Atlas (prod) / replica set (local) | Banco próprio gerenciado (**NoSQL**); transação multi-documento |
 | AWS SNS/SQS (SDK v2) | Mensageria da Saga + DLQ |
 | Micrometer + Datadog | Métricas e observabilidade |
@@ -183,17 +183,22 @@ docker run -d -p 27017:27017 mongo:7 --replSet rs0
 # em outro terminal, inicie o replica set:
 docker exec -it <container> mongosh --eval "rs.initiate()"
 
-./mvnw spring-boot:run
+./mvnw spring-boot:run -Dspring-boot.run.profiles=local
 ```
+
+> **Sem valores padrão para segredos.** Fora do perfil `local` (`JWT_SECRET`) são
+> obrigatórios: sem eles o serviço não sobe. O perfil `local` (`application-local.yml`)
+> traz os valores de desenvolvimento e é ativado pelo compose do `workbench-messaging`.
 
 | Variável | Default | Descrição |
 |---|---|---|
 | `MONGODB_URI` | `mongodb://localhost:27017/execution` | Banco próprio (precisa ser replica set) |
-| `JWT_SECRET` | valor de dev | Segredo HS256 compartilhado |
+| `JWT_SECRET` | — (obrigatório; dev no perfil `local`) | Segredo HS256 compartilhado |
 | `MESSAGING_ENABLED` | `false` | liga SNS/SQS; `false` roda sem broker |
 | `AWS_ENDPOINT` | — | vazio = AWS real; `http://localhost:4566` = LocalStack |
 | `EXECUTION_COMMANDS_QUEUE_URL` | — | Fila de comandos da Saga para o Execution |
 | `EXECUTION_EVENTS_TOPIC_ARN` | — | Tópico onde o Execution publica as respostas |
+| `SCHEDULING_POOL_SIZE` | `4` | Threads dos jobs `@Scheduled` |
 
 ---
 
@@ -201,6 +206,13 @@ docker exec -it <container> mongosh --eval "rs.initiate()"
 
 Manifests em `k8s/`. Deploy automatizado pelo pipeline (`deploy-aws`, quando
 `USE_AWS=true`) no cluster `workbench-platform-<branch>`, namespace `execution-service`.
+
+O que os manifests garantem:
+- **Rede:** o Service é um **NLB interno** (`aws-load-balancer-internal`), alcançável só de dentro da VPC. O tráfego de fora entra pelo API Gateway (VPC Link + authorizer JWT); Swagger e actuator não ficam na internet. Se o Service já existia como LB público, o pipeline o recria uma vez (o esquema de um LB não muda depois de criado). Uma `NetworkPolicy` deixa entrar só a porta 8080 (vale com NetworkPolicy ligada no VPC CNI).
+- **Imagem:** o pipeline troca o `REPLACE_IMAGE` do `app.yaml` pela tag do commit antes do `kubectl apply` (um rollout por deploy). Não há tag `:latest`; o `dd-java-agent` injetado pelo Datadog tem versão fixa (`v1.68.2`).
+- **Pods:** usuário não-root (UID 10001), sem escalar privilégio, sem capabilities, sistema de arquivos somente leitura (só `/tmp` gravável), `seccomp` padrão. A subida tem um `startupProbe` (até 5 min); liveness e readiness começam depois. A JVM usa até 75% da memória do container (`-XX:MaxRAMPercentage=75.0`).
+- **Escala:** o número de réplicas é só do HPA (o `Deployment` não fixa `replicas`), e um `PodDisruptionBudget` tira no máximo 1 pod por vez numa troca de nó.
+- **Banco:** MongoDB Atlas (`MONGODB_URI` no Secret). `k8s/mongo-local.yaml` é só para testar num cluster sem Atlas (o pipeline não aplica).
 
 ---
 
@@ -263,7 +275,7 @@ Todas exigem token de staff (ADMIN/TECHNICIAN).
 - Integração com **Testcontainers MongoDB** (replica set) — fluxo real reserva→baixa.
 - **Teste de contrato da Saga** (`ExecutionSagaContractTest`): consome o exemplo de
   `ComandoReservarEstoque` do contrato e confere os campos de tudo o que publica.
-- Cobertura atual (medida em 2026-11-11): **88,7% de linhas** e 76,5% de branches (`target/site/jacoco/index.html`).
+- Cobertura atual (medida em 2026-11-15): **89,0% de linhas** e 78,6% de branches (`target/site/jacoco/index.html`).
 - Evidência por execução do CI: artefato `jacoco-report` do job `unit-test` (relatório HTML) e o Quality Gate do SonarCloud no job `code-analysis`.
 
 ---

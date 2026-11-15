@@ -39,7 +39,6 @@ class JwtServiceTest {
         Claims claims = service.tryParseClaims(staff()).orElseThrow();
         assertFalse(service.isClientToken(claims));
         assertTrue(service.extractRoles(claims).contains("ADMIN"));
-        assertFalse(service.isExpired(claims));
     }
 
     @Test

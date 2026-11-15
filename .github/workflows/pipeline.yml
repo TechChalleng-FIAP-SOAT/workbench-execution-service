@@ -108,7 +108,6 @@ jobs:
           push: true
           platforms: linux/amd64
           tags: |
-            ${{ secrets.DOCKER_USERNAME }}/execution-service:latest
             ${{ steps.meta.outputs.image }}
 
   deploy-aws:
@@ -185,11 +184,18 @@ jobs:
             --from-literal JWT_SECRET="${JWT_SECRET}" \
             --from-literal DD_API_KEY="${DD_API_KEY}" \
             --dry-run=client -o yaml | kubectl apply -f -
-          kubectl apply -f k8s/app.yaml
+          # O LB do Service passou a ser NLB interno (k8s/app.yaml). O esquema de um LB não
+          # muda depois de criado, então um Service antigo (público) é recriado uma vez.
+          if kubectl get service execution-service -n execution-service >/dev/null 2>&1 && \
+             [ "$(kubectl get service execution-service -n execution-service -o jsonpath='{.metadata.annotations.service\.beta\.kubernetes\.io/aws-load-balancer-internal}')" != "true" ]; then
+            kubectl delete service execution-service -n execution-service
+          fi
+          # A imagem do commit entra no manifesto antes do apply: um rollout só, sem passar
+          # pelo placeholder REPLACE_IMAGE.
+          sed "s#REPLACE_IMAGE#${IMAGE}#" k8s/app.yaml | kubectl apply -f -
           kubectl apply -f k8s/hpa.yaml
           kubectl patch deployment execution-service -n execution-service --type merge \
             -p "{\"spec\":{\"template\":{\"metadata\":{\"labels\":{\"tags.datadoghq.com/env\":\"${DD_ENV_TAG}\"}}}}}"
-          kubectl set image deployment/execution-service execution-service="${IMAGE}" -n execution-service
           kubectl rollout status deployment/execution-service -n execution-service --timeout=300s
 
   # ---------------------------------------------------------------------------

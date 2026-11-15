@@ -1,0 +1,5 @@
+# Perfil local (IDE e docker compose): valores de DESENVOLVIMENTO.
+# Fora dele não há valor padrão: sem JWT_SECRET o serviço não sobe.
+# Ative com SPRING_PROFILES_ACTIVE=local (o compose do workbench-messaging já ativa).
+jwt:
+  secret: ${JWT_SECRET:akmsdkmasfnjsgknakmsdkmasdkmsadfkmdsakmdkmsadsa}
