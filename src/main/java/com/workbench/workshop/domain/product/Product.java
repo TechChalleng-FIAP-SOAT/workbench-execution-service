@@ -4,7 +4,6 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.Setter;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -15,7 +14,6 @@ import java.time.LocalDateTime;
  * do monólito — modelagem natural para documento.
  */
 @Getter
-@Setter
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
@@ -42,4 +40,28 @@ public class Product {
 
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
+
+    /**
+     * Substitui os dados cadastrais pelos de {@code changes}, mantendo identidade
+     * (id), situação (active) e auditoria (createdAt).
+     */
+    public void replaceDetailsWith(Product changes) {
+        this.name = changes.name;
+        this.sku = changes.sku;
+        this.type = changes.type;
+        this.unit = changes.unit;
+        this.category = changes.category;
+        this.brand = changes.brand;
+        this.costPrice = changes.costPrice;
+        this.salePrice = changes.salePrice;
+        this.manufacturerCode = changes.manufacturerCode;
+        this.warrantyMonths = changes.warrantyMonths;
+        this.fractionalAllowed = changes.fractionalAllowed;
+        this.packageSize = changes.packageSize;
+    }
+
+    /** Produto novo entra no catálogo ativo. */
+    public void activate() {
+        this.active = true;
+    }
 }

@@ -171,4 +171,46 @@ class StockIntegrationTest {
     void healthIsPublic() throws Exception {
         mockMvc.perform(get("/actuator/health")).andExpect(status().isOk());
     }
+
+    @Test
+    void productCanBeUpdatedAndSkuStaysUnique() throws Exception {
+        String a = mockMvc.perform(auth(post("/api/products")).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Filtro de óleo\",\"sku\":\"FO-100\",\"type\":\"PART\",\"unit\":\"UNIT\",\"salePrice\":30.00}"))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String id = mapper.readTree(a).get("id").asText();
+        mockMvc.perform(auth(post("/api/products")).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Filtro de ar\",\"sku\":\"FA-200\",\"type\":\"PART\",\"unit\":\"UNIT\",\"salePrice\":40.00}"))
+                .andExpect(status().isCreated());
+
+        // SKU repetido na criação → 409 (antes caía no catch-all como 500)
+        mockMvc.perform(auth(post("/api/products")).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Outro\",\"sku\":\"FO-100\",\"type\":\"PART\",\"unit\":\"UNIT\",\"salePrice\":1}"))
+                .andExpect(status().isConflict());
+
+        mockMvc.perform(auth(put("/api/products/" + id)).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Filtro de óleo premium\",\"sku\":\"FO-100\",\"type\":\"PART\",\"unit\":\"UNIT\",\"brand\":\"Marca Y\",\"salePrice\":42.50}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Filtro de óleo premium"))
+                .andExpect(jsonPath("$.salePrice").value(42.50))
+                .andExpect(jsonPath("$.active").value(true));
+
+        // trocar para o SKU de outro produto → 409
+        mockMvc.perform(auth(put("/api/products/" + id)).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"X\",\"sku\":\"FA-200\",\"type\":\"PART\",\"unit\":\"UNIT\",\"salePrice\":1}"))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void responsesCarrySecurityHeaders() throws Exception {
+        // Mesmo sem token (401), toda resposta leva os cabeçalhos de proteção.
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/products"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isUnauthorized())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("X-Frame-Options", "DENY"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("X-Content-Type-Options", "nosniff"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Cross-Origin-Resource-Policy", "same-origin"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Cross-Origin-Opener-Policy", "same-origin"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Cross-Origin-Embedder-Policy", "require-corp"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().contentTypeCompatibleWith("application/json"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.status").value(401));
+    }
 }

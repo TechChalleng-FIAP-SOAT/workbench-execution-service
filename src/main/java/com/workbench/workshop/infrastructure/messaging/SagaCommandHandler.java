@@ -1,7 +1,9 @@
 package com.workbench.workshop.infrastructure.messaging;
 
 import com.workbench.workshop.application.product.port.out.ProductRepository;
-import com.workbench.workshop.application.stock.ReservationUseCases;
+import com.workbench.workshop.application.stock.ConfirmReservationUseCase;
+import com.workbench.workshop.application.stock.ReleaseReservationUseCase;
+import com.workbench.workshop.application.stock.ReserveStockUseCase;
 import com.workbench.workshop.domain.product.Product;
 import com.workbench.workshop.domain.stock.StockReservation;
 import lombok.RequiredArgsConstructor;
@@ -11,9 +13,12 @@ import org.springframework.stereotype.Component;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+
+import static com.workbench.workshop.infrastructure.messaging.SagaMessages.*;
 
 /**
  * Traduz os comandos da Saga (recebidos por SQS) em chamadas aos casos de uso de
@@ -33,7 +38,9 @@ import java.util.UUID;
 @Slf4j
 public class SagaCommandHandler {
 
-    private final ReservationUseCases reservationUseCases;
+    private final ReserveStockUseCase reserveStock;
+    private final ConfirmReservationUseCase confirmReservation;
+    private final ReleaseReservationUseCase releaseReservation;
     private final ProductRepository productRepository;
     private final ExecutionEventPublisher publisher;
 
@@ -42,19 +49,19 @@ public class SagaCommandHandler {
         UUID serviceOrderId = UUID.fromString(cmd.serviceOrderId());
         log.info("Comando recebido: type={}, serviceOrderId={}", cmd.type(), serviceOrderId);
         switch (cmd.type()) {
-            case "ComandoReservarEstoque" -> reservar(cmd, serviceOrderId);
-            case "ComandoConfirmarReserva" -> {
-                List<StockReservation> confirmed = reservationUseCases.confirm(serviceOrderId);
+            case RESERVE_STOCK -> reserveStock(cmd, serviceOrderId);
+            case CONFIRM_RESERVATION -> {
+                List<StockReservation> confirmed = confirmReservation.execute(serviceOrderId);
                 log.info("Reserva baixada (estoque confirmado): reservations={}, serviceOrderId={}",
                         confirmed.size(), serviceOrderId);
-                publisher.publish(MessageEnvelope.of("ReservaBaixada", cmd.sagaId(), cmd.serviceOrderId(),
+                publisher.publish(MessageEnvelope.of(RESERVATION_CONFIRMED, cmd.sagaId(), cmd.serviceOrderId(),
                         Map.of("reservations", confirmed.size())));
             }
-            case "ComandoLiberarReserva" -> {
-                List<StockReservation> released = reservationUseCases.release(serviceOrderId);
+            case RELEASE_RESERVATION -> {
+                List<StockReservation> released = releaseReservation.execute(serviceOrderId);
                 log.info("Reserva liberada (compensação de estoque): reservations={}, serviceOrderId={}",
                         released.size(), serviceOrderId);
-                publisher.publish(MessageEnvelope.of("ReservaLiberada", cmd.sagaId(), cmd.serviceOrderId(),
+                publisher.publish(MessageEnvelope.of(RESERVATION_RELEASED, cmd.sagaId(), cmd.serviceOrderId(),
                         Map.of("reservations", released.size())));
             }
             default -> log.warn("Comando desconhecido ignorado: type={}", cmd.type());
@@ -70,7 +77,7 @@ public class SagaCommandHandler {
         List<Map<String, Object>> parts = new ArrayList<>();
         for (StockReservation r : reservations) {
             Product p = productRepository.findById(r.getProductId()).orElse(null);
-            Map<String, Object> part = new java.util.HashMap<>();
+            Map<String, Object> part = new HashMap<>();
             part.put("productId", r.getProductId());
             part.put("quantity", r.getQuantity());
             if (p != null) {
@@ -92,29 +99,30 @@ public class SagaCommandHandler {
     }
 
     @SuppressWarnings("unchecked")
-    private void reservar(MessageEnvelope cmd, UUID serviceOrderId) {
+    private void reserveStock(MessageEnvelope cmd, UUID serviceOrderId) {
         List<Map<String, Object>> rawItems = (List<Map<String, Object>>) cmd.payload().getOrDefault("items", List.of());
-        List<ReservationUseCases.ReserveItem> items = rawItems.stream()
-                .map(i -> new ReservationUseCases.ReserveItem(
-                        String.valueOf(i.get("productId")),
-                        new BigDecimal(String.valueOf(i.get("quantity")))))
-                .toList();
         try {
-            var reservations = reservationUseCases.reserve(serviceOrderId, items);
+            List<ReserveStockUseCase.ReserveItem> items = rawItems.stream()
+                    .map(i -> new ReserveStockUseCase.ReserveItem(
+                            String.valueOf(i.get("productId")),
+                            new BigDecimal(String.valueOf(i.get("quantity")))))
+                    .toList();
+            var reservations = reserveStock.execute(serviceOrderId, items);
             log.info("Reserva confirmada (estoque reservado): reservations={}, serviceOrderId={}",
                     reservations.size(), serviceOrderId);
             // Enriquece a resposta com as peças precificadas (name/sku/brand/unitPrice):
             // é o Execution, dono do catálogo, quem resolve marca e preço do productId.
             // O orquestrador repassa essas parts ao Billing no ComandoGerarOrcamento.
-            publisher.publish(MessageEnvelope.of("ReservaConfirmada", cmd.sagaId(), cmd.serviceOrderId(),
+            publisher.publish(MessageEnvelope.of(STOCK_RESERVED, cmd.sagaId(), cmd.serviceOrderId(),
                     Map.of("reservations", reservations.size(),
                             "parts", pricedParts(reservations))));
-        } catch (RuntimeException e) {
-            // Falha de reserva (estoque insuficiente/inexistente) é um resultado de
-            // negócio da Saga: responde ReservaFalhou (não relança — a mensagem é
-            // consumida; a compensação cabe ao orquestrador).
+        } catch (IllegalArgumentException | IllegalStateException e) {
+            // Falha de NEGÓCIO (estoque insuficiente/inexistente, item inválido) é um
+            // resultado da Saga: responde ReservaFalhou (a compensação cabe ao orquestrador).
+            // Falha técnica (ex.: WriteConflict de reserva concorrente, Mongo fora) não é
+            // capturada aqui: sobe, a mensagem não é apagada e o SQS reentrega.
             log.warn("Reserva falhou para OS {}: {}", serviceOrderId, e.getMessage());
-            publisher.publish(MessageEnvelope.of("ReservaFalhou", cmd.sagaId(), cmd.serviceOrderId(),
+            publisher.publish(MessageEnvelope.of(RESERVATION_FAILED, cmd.sagaId(), cmd.serviceOrderId(),
                     Map.of("reason", e.getMessage())));
         }
     }

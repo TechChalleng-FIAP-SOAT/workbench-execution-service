@@ -1,12 +1,16 @@
 spring:
   application:
     name: execution-service
+  # Spring Boot 4: a conexão saiu de spring.data.mongodb.* para spring.mongodb.*
+  # (as chaves antigas são ignoradas — o serviço cairia sempre em localhost).
+  mongodb:
+    uri: ${MONGODB_URI:mongodb://localhost:27017/execution}
+    representation:
+      # Necessário para persistir campos UUID (ex.: serviceOrderId) de forma portável.
+      uuid: standard
   data:
     mongodb:
-      uri: ${MONGODB_URI:mongodb://localhost:27017/execution}
       auto-index-creation: true
-      # Necessário para persistir campos UUID (ex.: serviceOrderId) de forma portável.
-      uuid-representation: standard
 
 # JWT (HS256) — mesmo secret compartilhado pela plataforma (Lambda/os-service).
 jwt:

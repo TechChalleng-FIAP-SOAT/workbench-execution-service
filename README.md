@@ -8,7 +8,7 @@ Challenge — FIAP Pós Tech, Fase 4). Dono do estoque e do ciclo
 > mantido como base histórica). Na Fase 4 a aplicação foi refatorada em
 > **microsserviços independentes**, cada um com seu repositório, infraestrutura e
 > banco próprios. Este repositório é o **Execution Service**. A divisão dos serviços e
-> a estratégia da Saga estão nos ADRs (`workbench-monolith/docs/adr` — ADR-0003 e ADR-0005).
+> a estratégia da Saga estão nos ADRs (`workbench-monolith/docs/adr` — ADR-0006 e ADR-0005).
 
 ---
 
@@ -33,11 +33,13 @@ Challenge — FIAP Pós Tech, Fase 4). Dono do estoque e do ciclo
 ## Responsabilidades
 
 - CRUD de **produtos** (peças/insumos) e de **estoque**
-- Entrada/saída de estoque com **histórico de movimentações**
+- Entrada/saída de estoque, cada uma registrada como **movimentação** (trilha de auditoria
+  gravada no banco; não há rota de consulta)
 - **Consulta de disponibilidade** (para montar o orçamento): informa a falta com nome
   da peça e quantidade disponível
 - **Reserva de estoque** com máquina de estados, orquestrada pela Saga:
-  `ACTIVE` (reservado) → `CONFIRMED` (baixa, na aprovação) → `RELEASED` (retorno, na recusa)
+  `ACTIVE` (reservado) → `CONFIRMED` (baixa, na aprovação) **ou** `ACTIVE` → `RELEASED`
+  (retorno, na recusa/falha). Só uma reserva ACTIVE muda de status.
 
 ---
 
@@ -61,8 +63,15 @@ Challenge — FIAP Pós Tech, Fase 4). Dono do estoque e do ciclo
 Único serviço **NoSQL** da plataforma — é ele que satisfaz o requisito obrigatório
 "ao menos um banco não relacional". A reserva (ajuste de estoque + registro da reserva
 + movimento) é **atômica** via **transações multi-documento** do MongoDB
-(`@Transactional`), o que exige um **replica set** (o ambiente local sobe
-`mongod --replSet rs0`; o Testcontainers provê um replica set de 1 nó).
+(`@Transactional` + o bean `MongoTransactionManager` em `MongoConfig` — sem ele o Spring
+ignora as anotações), o que exige um **replica set** (o ambiente local sobe
+`mongod --replSet rs0`; o Atlas e o Testcontainers já são replica set).
+
+Duas gravações concorrentes no mesmo estoque (ex.: duas réplicas reservando o mesmo
+produto) fazem o MongoDB abortar a segunda (*WriteConflict*) em vez de perder uma
+atualização; esse erro técnico volta para a fila e é tentado de novo — só falta de estoque
+vira `ReservaFalhou`. As escritas de estoque pela API (entrada, saída, mínimo) também são
+transacionais.
 
 > Decisão (ADR-0005): **Mongo puro** neste serviço (um serviço = um banco), em vez de
 > Postgres+Mongo, evitando dois datasources. A atomicidade da reserva é garantida pela
@@ -85,8 +94,13 @@ Challenge — FIAP Pós Tech, Fase 4). Dono do estoque e do ciclo
 
 No `ReservaConfirmada`, o Execution (dono do catálogo) enriquece cada peça com `name`,
 `sku`, `brand` (marca) e `unitPrice`. A **mesma peça em marcas diferentes** é um
-produto distinto, com preço distinto. Consumer com dedupe por `messageId` e redrive
-para **DLQ**.
+produto distinto, com preço distinto.
+
+Comandos repetidos (reenvio por timeout ou SQS) não duplicam efeito: se a OS já tem
+reserva ACTIVE, a reserva existente é devolvida; confirmar/liberar de novo devolve o
+resultado anterior. Consumer com dedupe por `messageId` e redrive para **DLQ**. Nomes e
+campos seguem o contrato executável `workbench-messaging/contracts/saga-messages.json`
+(`ExecutionSagaContractTest`).
 
 ---
 
@@ -95,11 +109,15 @@ para **DLQ**.
 ```
 src/main/java/com/workbench/workshop/
 ├── adapter/
-│   ├── in/web/            # ProductController, StockController
+│   ├── in/web/            # ProductController, StockController + ProductDtos/StockDtos
 │   └── out/persistence/   # Adapters MongoDB (product, stock, reservation, movement)
-├── application/           # Use cases + ports (ReservationUseCases, ProductUseCases, CheckAvailability)
-├── domain/                # Product, Stock, StockReservation (máquina de estados), StockMovement
-└── infrastructure/        # config (Mongo), messaging (SNS/SQS)
+├── application/           # Uma classe por caso de uso + ports
+│   ├── product/           # Create/FindById/List/DeleteProduct
+│   └── stock/             # CreateStock, FindStockByProduct, ListStock, ListLowStock,
+│                          # RegisterStockEntry/Exit, UpdateMinimumStock, CheckAvailability,
+│                          # ReserveStock, Confirm/ReleaseReservation, FindReservationsByServiceOrder
+├── domain/                # Product, Stock (sem setters: só reserve/confirm/release/…), StockReservation, StockMovement
+└── infrastructure/        # config (Mongo + MongoTransactionManager), messaging (SNS/SQS)
 ```
 
 ---
@@ -132,8 +150,10 @@ unit-test ──▶ code-analysis ──▶ build ──▶ docker-build-push �
  badge)
 ```
 
-Secrets/variáveis idênticos aos demais serviços (`DOCKER_*`, `SONAR_TOKEN`, `AWS_*`,
-`USE_AWS`), mais o **`MONGODB_URI`** (connection string do Atlas) no Secret do serviço.
+Secrets/variáveis comuns aos serviços (`DOCKER_*`, `SONAR_TOKEN`, `AWS_*`, `USE_AWS`) —
+ver o README do `workbench-os-service` —, mais `JWT_SECRET` e o **`MONGODB_URI`**
+(connection string do Atlas). O job `deploy-aws` monta o Secret do pod a partir deles (o
+`k8s/secret.yaml` só tem placeholders) e falha no início se faltar algum.
 Um **cluster MongoDB Atlas** (free tier `M0`) é pré-requisito do deploy AWS: crie o
 cluster, um usuário de banco, libere o acesso de rede e use a URI `mongodb+srv://...`
 como `MONGODB_URI`.
@@ -168,8 +188,12 @@ docker exec -it <container> mongosh --eval "rs.initiate()"
 
 | Variável | Default | Descrição |
 |---|---|---|
+| `MONGODB_URI` | `mongodb://localhost:27017/execution` | Banco próprio (precisa ser replica set) |
+| `JWT_SECRET` | valor de dev | Segredo HS256 compartilhado |
 | `MESSAGING_ENABLED` | `false` | liga SNS/SQS; `false` roda sem broker |
 | `AWS_ENDPOINT` | — | vazio = AWS real; `http://localhost:4566` = LocalStack |
+| `EXECUTION_COMMANDS_QUEUE_URL` | — | Fila de comandos da Saga para o Execution |
+| `EXECUTION_EVENTS_TOPIC_ARN` | — | Tópico onde o Execution publica as respostas |
 
 ---
 
@@ -192,7 +216,8 @@ apenas `GET /actuator/health*` e Swagger/OpenAPI.
 - **A03 (validação):** `@Valid` + Bean Validation nos DTOs de produto/estoque; acesso a
   dados via Spring Data MongoDB (sem interpolação de query).
 - **A05:** headers `X-Frame-Options: DENY` + `nosniff`; `k8s/secret.yaml` com placeholders
-  (`REPLACE_ME`), segredos reais via secret manager.
+  (`REPLACE_ME`) — os valores reais vêm dos secrets da org, montados pela pipeline. A API
+  responde com DTOs (`ProductResponse`…), nunca com a entidade de domínio.
 - **A09:** subject do token mascarado no log (MDC).
 
 > Hotspot `java:S4502` (CSRF disabled) marcado **Safe**: API REST stateless com JWT.
@@ -206,14 +231,25 @@ Todas exigem token de staff (ADMIN/TECHNICIAN).
 | Método | Rota | Descrição |
 |---|---|---|
 | POST | `/api/products` | Adicionar peça/insumo |
+| GET | `/api/products` | Listar o catálogo |
+| GET | `/api/products/{id}` | Buscar produto por ID |
+| PUT | `/api/products/{id}` | Atualizar dados da peça/insumo (SKU continua único → 409) |
 | DELETE | `/api/products/{id}` | Remover peça/insumo |
 | POST | `/api/stocks` | Criar estoque de um produto |
+| GET | `/api/stocks` | Listar estoques |
+| GET | `/api/stocks/low` | Listar estoques no mínimo ou abaixo dele |
+| GET | `/api/stocks/product/{id}` | Buscar estoque por produto |
 | PATCH | `/api/stocks/product/{id}/entry` | Entrada de estoque (**adicionar quantidade** a produto existente) |
 | PATCH | `/api/stocks/product/{id}/exit` | Saída de estoque |
+| PATCH | `/api/stocks/product/{id}/minimum` | Atualizar a quantidade mínima |
 | POST | `/api/stocks/availability` | Verificar disponibilidade de itens |
 | POST | `/api/stocks/reservations` | Reservar estoque |
+| GET | `/api/stocks/reservations/service-order/{osId}` | Listar reservas de uma OS |
 | PATCH | `/api/stocks/reservations/service-order/{osId}/confirm` | Confirmar (baixa) |
 | PATCH | `/api/stocks/reservations/service-order/{osId}/release` | Liberar (retorno) |
+
+> Na Saga, reservar/confirmar/liberar chegam por **mensageria**; as rotas REST de reserva
+> existem para operação manual e testes.
 
 ---
 
@@ -225,7 +261,10 @@ Todas exigem token de staff (ADMIN/TECHNICIAN).
 
 - **Gate JaCoCo 80%** no `verify`.
 - Integração com **Testcontainers MongoDB** (replica set) — fluxo real reserva→baixa.
-- Cobertura atual: **~89%** (`target/site/jacoco/index.html`).
+- **Teste de contrato da Saga** (`ExecutionSagaContractTest`): consome o exemplo de
+  `ComandoReservarEstoque` do contrato e confere os campos de tudo o que publica.
+- Cobertura atual (medida em 2026-11-11): **88,7% de linhas** e 76,5% de branches (`target/site/jacoco/index.html`).
+- Evidência por execução do CI: artefato `jacoco-report` do job `unit-test` (relatório HTML) e o Quality Gate do SonarCloud no job `code-analysis`.
 
 ---
 

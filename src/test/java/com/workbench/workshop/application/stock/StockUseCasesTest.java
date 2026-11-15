@@ -19,13 +19,23 @@ class StockUseCasesTest {
 
     private StockRepository stockRepository;
     private StockMovementRepository movementRepository;
-    private StockUseCases useCases;
+    private CreateStockUseCase createStock;
+    private RegisterStockEntryUseCase registerStockEntry;
+    private RegisterStockExitUseCase registerStockExit;
+    private FindStockByProductUseCase findStockByProduct;
+    private UpdateMinimumStockUseCase updateMinimumStock;
 
     @BeforeEach
     void setUp() {
         stockRepository = mock(StockRepository.class);
         movementRepository = mock(StockMovementRepository.class);
-        useCases = new StockUseCases(stockRepository, movementRepository);
+        createStock = new CreateStockUseCase(stockRepository);
+        registerStockEntry = new RegisterStockEntryUseCase(stockRepository, movementRepository);
+        registerStockExit = new RegisterStockExitUseCase(stockRepository, movementRepository);
+        findStockByProduct = new FindStockByProductUseCase(stockRepository);
+        updateMinimumStock = new UpdateMinimumStockUseCase(stockRepository);
+        when(stockRepository.getByProductId(any())).thenCallRealMethod();
+        doCallRealMethod().when(movementRepository).record(any(), any(), any(), any());
         when(stockRepository.save(any())).thenAnswer(i -> i.getArgument(0));
     }
 
@@ -38,14 +48,14 @@ class StockUseCasesTest {
 
     @Test
     void createInitializesAvailable() {
-        Stock created = useCases.create("p1", new BigDecimal("8"), new BigDecimal("2"));
+        Stock created = createStock.execute("p1", new BigDecimal("8"), new BigDecimal("2"));
         assertEquals(new BigDecimal("8"), created.getAvailableQuantity());
     }
 
     @Test
     void entryIncrementsAndRecordsMovement() {
         when(stockRepository.findByProductId("p1")).thenReturn(Optional.of(existing()));
-        Stock result = useCases.entry("p1", new BigDecimal("5"), "compra");
+        Stock result = registerStockEntry.execute("p1", new BigDecimal("5"), "compra");
         assertEquals(new BigDecimal("15"), result.getQuantity());
         verify(movementRepository).save(any());
     }
@@ -53,7 +63,7 @@ class StockUseCasesTest {
     @Test
     void exitDecrementsAndRecordsMovement() {
         when(stockRepository.findByProductId("p1")).thenReturn(Optional.of(existing()));
-        Stock result = useCases.exit("p1", new BigDecimal("4"), "uso");
+        Stock result = registerStockExit.execute("p1", new BigDecimal("4"), "uso");
         assertEquals(new BigDecimal("6"), result.getQuantity());
         verify(movementRepository).save(any());
     }
@@ -61,21 +71,14 @@ class StockUseCasesTest {
     @Test
     void findByProductIdThrowsWhenMissing() {
         when(stockRepository.findByProductId("x")).thenReturn(Optional.empty());
-        assertThrows(NoSuchElementException.class, () -> useCases.findByProductId("x"));
+        assertThrows(NoSuchElementException.class, () -> findStockByProduct.execute("x"));
     }
 
     @Test
     void updateMinimumPersists() {
         when(stockRepository.findByProductId("p1")).thenReturn(Optional.of(existing()));
-        Stock result = useCases.updateMinimum("p1", new BigDecimal("5"));
+        Stock result = updateMinimumStock.execute("p1", new BigDecimal("5"));
         assertEquals(new BigDecimal("5"), result.getMinimumQuantity());
     }
 
-    @Test
-    void findMovementsDelegates() {
-        when(stockRepository.findByProductId("p1")).thenReturn(Optional.of(existing()));
-        when(movementRepository.findByStockId("s1")).thenReturn(List.of());
-        assertNotNull(useCases.findMovements("p1"));
-        verify(movementRepository).findByStockId("s1");
-    }
 }
