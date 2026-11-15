@@ -1,11 +1,11 @@
 {
   "info": {
     "name": "Workbench - Execution Service",
-    "description": "Collection do microsserviço de Execução e Produção: catálogo de peças (Product) e estoque/reservas (Stock). NoSQL (MongoDB). Participa da Saga reservando/baixando/liberando estoque. Variáveis: baseUrl, token, productId, serviceOrderId.",
+    "description": "Collection do microsserviço de Execução e Produção: catálogo de peças (Product) e estoque/reservas (Stock). NoSQL (MongoDB). Participa da Saga reservando/baixando/liberando estoque. Variáveis: baseUrl, token, productId, serviceOrderId. baseUrl: http://localhost:8083 (serviço direto, compose local) ou http://localhost:8000 (gateway local). Na AWS os serviços têm NLB interno: use a invoke_url do API Gateway como baseUrl e o token do POST /auth/login.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
-    {"key": "baseUrl", "value": "http://localhost:8080"},
+    {"key": "baseUrl", "value": "http://localhost:8083"},
     {"key": "token", "value": ""},
     {"key": "productId", "value": "PROD-1"},
     {"key": "serviceOrderId", "value": ""}
