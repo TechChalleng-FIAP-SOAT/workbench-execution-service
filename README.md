@@ -77,6 +77,13 @@ transacionais.
 > Postgres+Mongo, evitando dois datasources. A atomicidade da reserva é garantida pela
 > transação do Mongo.
 
+**Por que MongoDB aqui:** o PDF exige ao menos um banco NoSQL, e este é o serviço que mais
+se encaixa: produtos (peças e insumos com atributos diferentes), estoque, reservas e
+movimentos são documentos lidos e gravados por produto ou por OS, sem junção com dados de
+outro serviço. **Por que Atlas:** o M0 é gerenciado e gratuito; o DocumentDB não tem plano
+gratuito e um Mongo no cluster exigiria volume, backup e replica set operados por nós.
+Todas as decisões, em perguntas: `workbench-technical-documentation/01 - Arquitetura/Decisoes de Arquitetura.md`.
+
 ---
 
 ## Comunicação e participação na Saga
