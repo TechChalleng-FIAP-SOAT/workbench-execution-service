@@ -206,7 +206,7 @@ docker exec -it <container> mongosh --eval "rs.initiate()"
 | Variável | Default | Descrição |
 |---|---|---|
 | `MONGODB_URI` | `mongodb://localhost:27017/execution` | Banco próprio (precisa ser replica set) |
-| `JWT_PUBLIC_KEY` | — (obrigatório; dev no perfil `local`) | Chave **pública** RS256 da Lambda de login: o serviço verifica token, não emite |
+| `JWT_PUBLIC_KEY` | — (obrigatório; em dev vem do `.env` do compose, gerado por `workbench-messaging/scripts/dev-keys.sh`) | Chave **pública** RS256 da Lambda de login: o serviço verifica token, não emite |
 | `MESSAGING_ENABLED` | `false` | liga SNS/SQS; `false` roda sem broker |
 | `AWS_ENDPOINT` | — | vazio = AWS real; `http://localhost:4566` = LocalStack |
 | `EXECUTION_COMMANDS_QUEUE_URL` | — | Fila de comandos da Saga para o Execution |
