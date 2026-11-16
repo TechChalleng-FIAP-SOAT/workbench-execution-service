@@ -17,10 +17,14 @@ spring:
   data:
     mongodb:
       auto-index-creation: true
+      representation:
+        # Valores monetários e quantidades como Decimal128 (número decimal exato do MongoDB).
+        # Como texto, "10" < "9" numa comparação, e consultas como "estoque baixo" erravam.
+        big-decimal: decimal128
 
-# JWT (HS256) — mesmo secret compartilhado pela plataforma (Lambda/os-service).
 jwt:
-  secret: ${JWT_SECRET}
+  # Chave PÚBLICA da Lambda de autenticação (RS256), Base64 do DER. Sem padrão: sem ela não sobe.
+  public-key: ${JWT_PUBLIC_KEY}
 
 logging:
   file:

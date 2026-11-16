@@ -125,13 +125,14 @@ jobs:
       # Valores reais do Secret da app, vindos dos secrets da org (o k8s/secret.yaml
       # só tem placeholders).
       MONGODB_URI: ${{ secrets.MONGODB_URI }}
-      JWT_SECRET: ${{ secrets.JWT_SECRET }}
+      # JWT RS256: só a chave PÚBLICA (o serviço verifica, não emite token).
+      JWT_PUBLIC_KEY: ${{ secrets.JWT_PUBLIC_KEY }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Validar secrets obrigatórios
         run: |
           missing=0
-          for v in MONGODB_URI JWT_SECRET; do
+          for v in MONGODB_URI JWT_PUBLIC_KEY; do
             if [ -z "${!v}" ]; then
               echo "::error::Secret obrigatório vazio ou ausente: ${v} (secrets da org). Sem ele o Secret execution-service-secret subiria sem credencial."
               missing=1
@@ -193,7 +194,7 @@ jobs:
           # prevalecem sobre as do ConfigMap.
           kubectl create secret generic execution-service-secret -n execution-service \
             --from-literal MONGODB_URI="${MONGODB_URI}" \
-            --from-literal JWT_SECRET="${JWT_SECRET}" \
+            --from-literal JWT_PUBLIC_KEY="${JWT_PUBLIC_KEY}" \
             --from-literal DD_API_KEY="${DD_API_KEY}" \
             --dry-run=client -o yaml | kubectl apply -f -
           # O LB do Service passou a ser NLB interno (k8s/app.yaml). O esquema de um LB não

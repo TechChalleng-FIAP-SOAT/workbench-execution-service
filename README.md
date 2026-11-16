@@ -73,6 +73,12 @@ atualização; esse erro técnico volta para a fila e é tentado de novo — só
 vira `ReservaFalhou`. As escritas de estoque pela API (entrada, saída, mínimo) também são
 transacionais.
 
+Quantidades e preços são gravados como **`Decimal128`** (o decimal exato do MongoDB,
+`spring.data.mongodb.representation.big-decimal=decimal128`). Por isso "estoque baixo" é uma
+consulta no próprio banco (`$expr` com `$lte`), e não um filtro em memória: como texto,
+`"10" < "9"`. Documentos antigos, gravados como texto, são convertidos no start pelo
+`DecimalStorageMigration` (idempotente; teste em `DecimalStorageIntegrationTest`).
+
 > Decisão (ADR-0005): **Mongo puro** neste serviço (um serviço = um banco), em vez de
 > Postgres+Mongo, evitando dois datasources. A atomicidade da reserva é garantida pela
 > transação do Mongo.
@@ -158,7 +164,7 @@ unit-test ──▶ code-analysis ──▶ build ──▶ docker-build-push �
 ```
 
 Secrets/variáveis comuns aos serviços (`DOCKER_*`, `SONAR_TOKEN`, `AWS_*`, `USE_AWS`) —
-ver o README do `workbench-os-service` —, mais `JWT_SECRET` e o **`MONGODB_URI`**
+ver o README do `workbench-os-service` —, mais `JWT_PUBLIC_KEY` e o **`MONGODB_URI`**
 (connection string do Atlas). O job `deploy-aws` monta o Secret do pod a partir deles (o
 `k8s/secret.yaml` só tem placeholders) e falha no início se faltar algum.
 Um **cluster MongoDB Atlas** (free tier `M0`) é pré-requisito do deploy AWS: crie o
@@ -193,14 +199,14 @@ docker exec -it <container> mongosh --eval "rs.initiate()"
 ./mvnw spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
-> **Sem valores padrão para segredos.** Fora do perfil `local` (`JWT_SECRET`) são
+> **Sem valores padrão para segredos.** Fora do perfil `local` (`JWT_PUBLIC_KEY`) são
 > obrigatórios: sem eles o serviço não sobe. O perfil `local` (`application-local.yml`)
 > traz os valores de desenvolvimento e é ativado pelo compose do `workbench-messaging`.
 
 | Variável | Default | Descrição |
 |---|---|---|
 | `MONGODB_URI` | `mongodb://localhost:27017/execution` | Banco próprio (precisa ser replica set) |
-| `JWT_SECRET` | — (obrigatório; dev no perfil `local`) | Segredo HS256 compartilhado |
+| `JWT_PUBLIC_KEY` | — (obrigatório; dev no perfil `local`) | Chave **pública** RS256 da Lambda de login: o serviço verifica token, não emite |
 | `MESSAGING_ENABLED` | `false` | liga SNS/SQS; `false` roda sem broker |
 | `AWS_ENDPOINT` | — | vazio = AWS real; `http://localhost:4566` = LocalStack |
 | `EXECUTION_COMMANDS_QUEUE_URL` | — | Fila de comandos da Saga para o Execution |
@@ -226,7 +232,7 @@ O que os manifests garantem:
 ## Segurança (JWT)
 
 Defesa em profundidade: o serviço **valida o JWT por conta própria** (Spring Security +
-filtro HS256 com o `JWT_SECRET` compartilhado). Catálogo e estoque são operações internas
+filtro RS256 com a chave pública da Lambda). Catálogo e estoque são operações internas
 da oficina, então **todas as rotas exigem token de staff (ADMIN/TECHNICIAN)**; públicas
 apenas `GET /actuator/health*` e Swagger/OpenAPI.
 
@@ -282,7 +288,7 @@ Todas exigem token de staff (ADMIN/TECHNICIAN).
 - Integração com **Testcontainers MongoDB** (replica set) — fluxo real reserva→baixa.
 - **Teste de contrato da Saga** (`ExecutionSagaContractTest`): consome o exemplo de
   `ComandoReservarEstoque` do contrato e confere os campos de tudo o que publica.
-- Cobertura atual (medida em 2026-11-15): **89,0% de linhas** e 78,6% de branches (`target/site/jacoco/index.html`).
+- Cobertura atual (medida em 2026-11-16): **89,3% de linhas** e 77,4% de branches (`target/site/jacoco/index.html`).
 - Evidência por execução do CI: artefato `jacoco-report` do job `unit-test` (relatório HTML) e o Quality Gate do SonarCloud no job `code-analysis`.
 
 ---

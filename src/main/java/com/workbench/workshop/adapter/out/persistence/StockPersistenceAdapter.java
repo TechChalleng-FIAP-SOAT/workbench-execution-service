@@ -50,10 +50,7 @@ public class StockPersistenceAdapter implements StockRepository {
 
     @Override
     public List<Stock> findLowStock() {
-        return repository.findAll().stream()
-                .map(this::toDomain)
-                .filter(Stock::isLowStock)
-                .toList();
+        return repository.findLowStock().stream().map(this::toDomain).toList();
     }
 
     private Stock toDomain(StockDocument d) {
