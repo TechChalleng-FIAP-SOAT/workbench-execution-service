@@ -1,12 +1,30 @@
 spring:
   application:
     name: execution-service
+  # Mais de uma thread para os @Scheduled: o consumidor SQS faz long polling e não pode
+  # dividir a única thread padrão com os outros jobs (timeout da Saga, consulta ao gateway).
+  task:
+    scheduling:
+      pool:
+        size: ${SCHEDULING_POOL_SIZE:4}
+  # Spring Boot 4: a conexão saiu de spring.data.mongodb.* para spring.mongodb.*
+  # (as chaves antigas são ignoradas — o serviço cairia sempre em localhost).
+  mongodb:
+    uri: ${MONGODB_URI:mongodb://localhost:27017/execution}
+    representation:
+      # Necessário para persistir campos UUID (ex.: serviceOrderId) de forma portável.
+      uuid: standard
   data:
     mongodb:
-      uri: ${MONGODB_URI:mongodb://localhost:27017/execution}
       auto-index-creation: true
-      # Necessário para persistir campos UUID (ex.: serviceOrderId) de forma portável.
-      uuid-representation: standard
+      representation:
+        # Valores monetários e quantidades como Decimal128 (número decimal exato do MongoDB).
+        # Como texto, "10" < "9" numa comparação, e consultas como "estoque baixo" erravam.
+        big-decimal: decimal128
+
+jwt:
+  # Chave PÚBLICA da Lambda de autenticação (RS256), Base64 do DER. Sem padrão: sem ela não sobe.
+  public-key: ${JWT_PUBLIC_KEY}
 
 logging:
   file:

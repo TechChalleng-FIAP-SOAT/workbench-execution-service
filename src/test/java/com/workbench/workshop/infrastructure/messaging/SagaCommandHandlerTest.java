@@ -1,7 +1,9 @@
 package com.workbench.workshop.infrastructure.messaging;
 
 import com.workbench.workshop.application.product.port.out.ProductRepository;
-import com.workbench.workshop.application.stock.ReservationUseCases;
+import com.workbench.workshop.application.stock.ConfirmReservationUseCase;
+import com.workbench.workshop.application.stock.ReleaseReservationUseCase;
+import com.workbench.workshop.application.stock.ReserveStockUseCase;
 import com.workbench.workshop.domain.product.Product;
 import com.workbench.workshop.domain.product.ProductType;
 import com.workbench.workshop.domain.stock.StockReservation;
@@ -16,6 +18,7 @@ import java.util.Optional;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -23,7 +26,9 @@ import static org.mockito.Mockito.*;
 
 class SagaCommandHandlerTest {
 
-    private ReservationUseCases reservationUseCases;
+    private ReserveStockUseCase reserveStock;
+    private ConfirmReservationUseCase confirmReservation;
+    private ReleaseReservationUseCase releaseReservation;
     private ProductRepository productRepository;
     private ExecutionEventPublisher publisher;
     private SagaCommandHandler handler;
@@ -32,10 +37,12 @@ class SagaCommandHandlerTest {
 
     @BeforeEach
     void setUp() {
-        reservationUseCases = mock(ReservationUseCases.class);
+        reserveStock = mock(ReserveStockUseCase.class);
+        confirmReservation = mock(ConfirmReservationUseCase.class);
+        releaseReservation = mock(ReleaseReservationUseCase.class);
         productRepository = mock(ProductRepository.class);
         publisher = mock(ExecutionEventPublisher.class);
-        handler = new SagaCommandHandler(reservationUseCases, productRepository, publisher);
+        handler = new SagaCommandHandler(reserveStock, confirmReservation, releaseReservation, productRepository, publisher);
     }
 
     private MessageEnvelope cmd(String type, Map<String, Object> payload) {
@@ -44,10 +51,10 @@ class SagaCommandHandlerTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void reservarPublishesReservaConfirmadaWithPricedParts() {
+    void reservePublishesStockReservedWithPricedParts() {
         StockReservation reservation = StockReservation.builder()
                 .productId("p1").quantity(new BigDecimal("2")).build();
-        when(reservationUseCases.reserve(eq(osId), any())).thenReturn(List.of(reservation));
+        when(reserveStock.execute(eq(osId), any())).thenReturn(List.of(reservation));
         when(productRepository.findById("p1")).thenReturn(Optional.of(Product.builder()
                 .id("p1").name("Pastilha de freio").sku("PF-1").brand("Marca X")
                 .type(ProductType.PART).salePrice(new BigDecimal("500.00")).build()));
@@ -71,10 +78,10 @@ class SagaCommandHandlerTest {
 
     @Test
     @SuppressWarnings("unchecked")
-    void reservarUsesFallbackPartWhenProductMissing() {
+    void reserveUsesFallbackPartWhenProductMissing() {
         StockReservation reservation = StockReservation.builder()
                 .productId("ghost").quantity(new BigDecimal("1")).build();
-        when(reservationUseCases.reserve(eq(osId), any())).thenReturn(List.of(reservation));
+        when(reserveStock.execute(eq(osId), any())).thenReturn(List.of(reservation));
         when(productRepository.findById("ghost")).thenReturn(Optional.empty());
         var payload = Map.<String, Object>of("items", List.of(Map.of("productId", "ghost", "quantity", "1")));
 
@@ -88,8 +95,8 @@ class SagaCommandHandlerTest {
     }
 
     @Test
-    void reservarPublishesReservaFalhouOnInsufficientStock() {
-        when(reservationUseCases.reserve(eq(osId), any()))
+    void reservePublishesReservationFailedOnInsufficientStock() {
+        when(reserveStock.execute(eq(osId), any()))
                 .thenThrow(new IllegalStateException("Insufficient available stock"));
         var payload = Map.<String, Object>of("items", List.of(Map.of("productId", "p1", "quantity", "99")));
 
@@ -101,8 +108,20 @@ class SagaCommandHandlerTest {
     }
 
     @Test
-    void confirmarPublishesReservaBaixada() {
-        when(reservationUseCases.confirm(osId)).thenReturn(List.of(mock(StockReservation.class)));
+    void technicalFailureIsRethrownForRedelivery() {
+        // Ex.: WriteConflict de uma reserva concorrente — não é falta de estoque.
+        when(reserveStock.execute(eq(osId), any()))
+                .thenThrow(new org.springframework.dao.DataAccessResourceFailureException("write conflict"));
+        var payload = Map.<String, Object>of("items", List.of(Map.of("productId", "p1", "quantity", "1")));
+
+        assertThrows(org.springframework.dao.DataAccessException.class,
+                () -> handler.handle(cmd("ComandoReservarEstoque", payload)));
+        verifyNoInteractions(publisher);
+    }
+
+    @Test
+    void confirmPublishesReservationConfirmed() {
+        when(confirmReservation.execute(osId)).thenReturn(List.of(mock(StockReservation.class)));
         handler.handle(cmd("ComandoConfirmarReserva", Map.of()));
         ArgumentCaptor<MessageEnvelope> captor = ArgumentCaptor.forClass(MessageEnvelope.class);
         verify(publisher).publish(captor.capture());
@@ -110,8 +129,8 @@ class SagaCommandHandlerTest {
     }
 
     @Test
-    void liberarPublishesReservaLiberada() {
-        when(reservationUseCases.release(osId)).thenReturn(List.of(mock(StockReservation.class)));
+    void releasePublishesReservationReleased() {
+        when(releaseReservation.execute(osId)).thenReturn(List.of(mock(StockReservation.class)));
         handler.handle(cmd("ComandoLiberarReserva", Map.of()));
         ArgumentCaptor<MessageEnvelope> captor = ArgumentCaptor.forClass(MessageEnvelope.class);
         verify(publisher).publish(captor.capture());

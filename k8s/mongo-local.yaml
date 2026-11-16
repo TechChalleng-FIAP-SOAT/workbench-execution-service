@@ -1,0 +1,46 @@
+# MongoDB in-cluster — OPCIONAL, apenas para quem quiser rodar o execution-service
+# no Kubernetes SEM um Mongo gerenciado.
+#
+# NÃO é aplicado pelo pipeline. Em produção usamos MongoDB Atlas (gerenciado,
+# free tier) e apontamos MONGODB_URI via secret (k8s/secret.yaml). Para o
+# desenvolvimento local, o Mongo já sobe pelo workbench-messaging/docker-compose.dev.yml.
+#
+# Uso manual (se desejar testar no cluster sem Atlas):
+#   kubectl apply -f k8s/mongo-local.yaml
+#   # e ajuste MONGODB_URI para mongodb://execution-mongo:27017/execution
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: execution-mongo
+  namespace: execution-service
+  labels:
+    app: execution-mongo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: execution-mongo
+  template:
+    metadata:
+      labels:
+        app: execution-mongo
+    spec:
+      containers:
+        - name: mongo
+          image: mongo:7
+          ports:
+            - containerPort: 27017
+          # Replica set de 1 nó para habilitar transações multi-documento.
+          command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: execution-mongo
+  namespace: execution-service
+spec:
+  selector:
+    app: execution-mongo
+  ports:
+    - port: 27017
+      targetPort: 27017

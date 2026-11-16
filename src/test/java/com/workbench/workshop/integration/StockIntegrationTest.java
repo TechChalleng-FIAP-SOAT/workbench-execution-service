@@ -1,5 +1,6 @@
 package com.workbench.workshop.integration;
 
+import com.workbench.workshop.support.TestKeys;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -9,11 +10,15 @@ import org.springframework.boot.testcontainers.service.connection.ServiceConnect
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.testcontainers.DockerClientFactory;
 import org.testcontainers.containers.MongoDBContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
+import java.security.PrivateKey;
+import java.util.Date;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assumptions.assumeTrue;
@@ -43,10 +48,28 @@ class StockIntegrationTest {
     @Autowired private MockMvc mockMvc;
     private final ObjectMapper mapper = new ObjectMapper();
 
+    private static String bearer() {
+        PrivateKey key = TestKeys.authPrivateKey();
+        long now = System.currentTimeMillis();
+        String token = TestKeys.authToken()
+                .subject("admin@workbench.dev")
+                .claim("roles", List.of("ADMIN"))
+                .issuedAt(new Date(now))
+                .expiration(new Date(now + 3600000))
+                .signWith(key)
+                .compact();
+        return "Bearer " + token;
+    }
+
+    /** Anexa o header Authorization (ADMIN) — as rotas exigem token após a Estratégia 2. */
+    private static MockHttpServletRequestBuilder auth(MockHttpServletRequestBuilder builder) {
+        return builder.header("Authorization", bearer());
+    }
+
     @Test
     void fullStockFlow_createCheckReserveConfirm() throws Exception {
         // 1. cria produto
-        var productJson = mockMvc.perform(post("/api/products")
+        var productJson = mockMvc.perform(auth(post("/api/products"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Pastilha de Freio\",\"sku\":\"PF-001\",\"type\":\"PART\",\"unit\":\"UNIT\",\"salePrice\":50.00}"))
                 .andExpect(status().isCreated())
@@ -54,14 +77,14 @@ class StockIntegrationTest {
         String productId = mapper.readTree(productJson).get("id").asText();
 
         // 2. cria estoque com 10 unidades
-        mockMvc.perform(post("/api/stocks")
+        mockMvc.perform(auth(post("/api/stocks"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"productId\":\"" + productId + "\",\"quantity\":10,\"minimumQuantity\":2}"))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.availableQuantity").value(10));
 
         // 3. disponibilidade suficiente
-        mockMvc.perform(post("/api/stocks/availability")
+        mockMvc.perform(auth(post("/api/stocks/availability"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"items\":[{\"productId\":\"" + productId + "\",\"quantity\":3}]}"))
                 .andExpect(status().isOk())
@@ -69,36 +92,36 @@ class StockIntegrationTest {
 
         // 4. reserva 3 → disponível cai para 7, total continua 10
         String osId = UUID.randomUUID().toString();
-        mockMvc.perform(post("/api/stocks/reservations")
+        mockMvc.perform(auth(post("/api/stocks/reservations"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"serviceOrderId\":\"" + osId + "\",\"items\":[{\"productId\":\"" + productId + "\",\"quantity\":3}]}"))
                 .andExpect(status().isCreated());
-        mockMvc.perform(get("/api/stocks/product/" + productId))
+        mockMvc.perform(auth(get("/api/stocks/product/" + productId)))
                 .andExpect(jsonPath("$.availableQuantity").value(7))
                 .andExpect(jsonPath("$.quantity").value(10));
 
         // 5. confirma → baixa: total cai para 7, reservado zera
-        mockMvc.perform(patch("/api/stocks/reservations/service-order/" + osId + "/confirm"))
+        mockMvc.perform(auth(patch("/api/stocks/reservations/service-order/" + osId + "/confirm")))
                 .andExpect(status().isOk());
-        mockMvc.perform(get("/api/stocks/product/" + productId))
+        mockMvc.perform(auth(get("/api/stocks/product/" + productId)))
                 .andExpect(jsonPath("$.quantity").value(7))
                 .andExpect(jsonPath("$.reservedQuantity").value(0));
     }
 
     @Test
     void availabilityReportsShortageWithName() throws Exception {
-        var productJson = mockMvc.perform(post("/api/products")
+        var productJson = mockMvc.perform(auth(post("/api/products"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Filtro de Oleo\",\"sku\":\"FO-9\",\"type\":\"PART\",\"unit\":\"UNIT\",\"salePrice\":30.00}"))
                 .andReturn().getResponse().getContentAsString();
         String productId = mapper.readTree(productJson).get("id").asText();
 
-        mockMvc.perform(post("/api/stocks")
+        mockMvc.perform(auth(post("/api/stocks"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"productId\":\"" + productId + "\",\"quantity\":1,\"minimumQuantity\":0}"))
                 .andExpect(status().isCreated());
 
-        mockMvc.perform(post("/api/stocks/availability")
+        mockMvc.perform(auth(post("/api/stocks/availability"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"items\":[{\"productId\":\"" + productId + "\",\"quantity\":5}]}"))
                 .andExpect(status().isOk())
@@ -109,20 +132,81 @@ class StockIntegrationTest {
 
     @Test
     void reserveInsufficientReturns409() throws Exception {
-        var productJson = mockMvc.perform(post("/api/products")
+        var productJson = mockMvc.perform(auth(post("/api/products"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"name\":\"Vela\",\"sku\":\"VL-1\",\"type\":\"PART\",\"unit\":\"UNIT\",\"salePrice\":10.00}"))
                 .andReturn().getResponse().getContentAsString();
         String productId = mapper.readTree(productJson).get("id").asText();
 
-        mockMvc.perform(post("/api/stocks")
+        mockMvc.perform(auth(post("/api/stocks"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"productId\":\"" + productId + "\",\"quantity\":1,\"minimumQuantity\":0}"))
                 .andExpect(status().isCreated());
 
-        mockMvc.perform(post("/api/stocks/reservations")
+        mockMvc.perform(auth(post("/api/stocks/reservations"))
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"serviceOrderId\":\"" + UUID.randomUUID() + "\",\"items\":[{\"productId\":\"" + productId + "\",\"quantity\":9}]}"))
                 .andExpect(status().isConflict());
+    }
+
+    @Test
+    void protectedRouteWithoutTokenReturns401() throws Exception {
+        mockMvc.perform(get("/api/stocks")).andExpect(status().isUnauthorized());
+    }
+
+    @Test
+    void createProductWithBlankNameReturns400() throws Exception {
+        // Bean Validation (OWASP A03): name em branco → 400 do handler.
+        mockMvc.perform(auth(post("/api/products"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"\",\"sku\":\"X-1\",\"type\":\"PART\",\"unit\":\"UNIT\",\"salePrice\":10.00}"))
+                .andExpect(status().isBadRequest());
+    }
+
+    @Test
+    void healthIsPublic() throws Exception {
+        mockMvc.perform(get("/actuator/health")).andExpect(status().isOk());
+    }
+
+    @Test
+    void productCanBeUpdatedAndSkuStaysUnique() throws Exception {
+        String a = mockMvc.perform(auth(post("/api/products")).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Filtro de óleo\",\"sku\":\"FO-100\",\"type\":\"PART\",\"unit\":\"UNIT\",\"salePrice\":30.00}"))
+                .andExpect(status().isCreated()).andReturn().getResponse().getContentAsString();
+        String id = mapper.readTree(a).get("id").asText();
+        mockMvc.perform(auth(post("/api/products")).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Filtro de ar\",\"sku\":\"FA-200\",\"type\":\"PART\",\"unit\":\"UNIT\",\"salePrice\":40.00}"))
+                .andExpect(status().isCreated());
+
+        // SKU repetido na criação → 409 (antes caía no catch-all como 500)
+        mockMvc.perform(auth(post("/api/products")).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Outro\",\"sku\":\"FO-100\",\"type\":\"PART\",\"unit\":\"UNIT\",\"salePrice\":1}"))
+                .andExpect(status().isConflict());
+
+        mockMvc.perform(auth(put("/api/products/" + id)).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"Filtro de óleo premium\",\"sku\":\"FO-100\",\"type\":\"PART\",\"unit\":\"UNIT\",\"brand\":\"Marca Y\",\"salePrice\":42.50}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.name").value("Filtro de óleo premium"))
+                .andExpect(jsonPath("$.salePrice").value(42.50))
+                .andExpect(jsonPath("$.active").value(true));
+
+        // trocar para o SKU de outro produto → 409
+        mockMvc.perform(auth(put("/api/products/" + id)).contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"name\":\"X\",\"sku\":\"FA-200\",\"type\":\"PART\",\"unit\":\"UNIT\",\"salePrice\":1}"))
+                .andExpect(status().isConflict());
+    }
+
+    @Test
+    void responsesCarrySecurityHeaders() throws Exception {
+        // Mesmo sem token (401), toda resposta leva os cabeçalhos de proteção.
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get("/api/products"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.status().isUnauthorized())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("X-Frame-Options", "DENY"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("X-Content-Type-Options", "nosniff"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Cross-Origin-Resource-Policy", "same-origin"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Cross-Origin-Opener-Policy", "same-origin"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.header().string("Cross-Origin-Embedder-Policy", "require-corp"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().contentTypeCompatibleWith("application/json"))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath("$.status").value(401));
     }
 }
