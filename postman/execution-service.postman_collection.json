@@ -7,7 +7,7 @@
   "variable": [
     {"key": "baseUrl", "value": "http://localhost:8083"},
     {"key": "token", "value": ""},
-    {"key": "productId", "value": "PROD-1"},
+    {"key": "productId", "value": ""},
     {"key": "serviceOrderId", "value": ""}
   ],
   "auth": {
@@ -24,7 +24,7 @@
             "method": "POST",
             "header": [{"key": "Content-Type", "value": "application/json"}],
             "url": {"raw": "{{baseUrl}}/api/products", "host": ["{{baseUrl}}"], "path": ["api", "products"]},
-            "body": {"mode": "raw", "raw": "{\n  \"name\": \"Óleo 5W30\",\n  \"sku\": \"OLEO-5W30\",\n  \"type\": \"PART\",\n  \"unit\": \"UN\",\n  \"category\": \"Lubrificantes\",\n  \"brand\": \"Mobil\",\n  \"costPrice\": 25.00,\n  \"salePrice\": 45.00,\n  \"manufacturerCode\": \"MB-5W30\",\n  \"warrantyMonths\": 6,\n  \"fractionalAllowed\": false,\n  \"packageSize\": 1\n}"}
+            "body": {"mode": "raw", "raw": "{\n  \"name\": \"Óleo 5W30\",\n  \"sku\": \"OLEO-5W30\",\n  \"type\": \"PART\",\n  \"unit\": \"UNIT\",\n  \"category\": \"Lubrificantes\",\n  \"brand\": \"Mobil\",\n  \"costPrice\": 25.00,\n  \"salePrice\": 45.00,\n  \"manufacturerCode\": \"MB-5W30\",\n  \"warrantyMonths\": 6,\n  \"fractionalAllowed\": false,\n  \"packageSize\": 1\n}"}
           }
         },
         {
